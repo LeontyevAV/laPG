@@ -1,15 +1,20 @@
 import subprocess
 import os
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
 # Загружаем переменные из .env файла
-load_dotenv()
+# load_dotenv()
 
 # --- Учетные данные для подключения ---
 # Для создания БД часто нужен суперпользователь или пользователь с правами CREATEDB
-DB_HOST = os.getenv("DB_HOST")
-DB_SUPERUSER = os.getenv("DB_SUPERUSER")  # Пользователь с правами CREATEDB
+DB_HOST = "localhost"
+# os.getenv("DB_HOST")
+DB_SUPERUSER = "postgres"
+# os.getenv("DB_SUPERUSER")  # Пользователь с правами CREATEDB
 DB_SUPERUSER_PASSWORD = os.getenv("DB_SUPERUSER_PASSWORD")
+
+# Имя новой базы данных, которую нужно создать и в которую восстановить
+DB_SUPERUSER_PASSWORD = input("Введите пароль для создания и восстановления: ").strip()
 
 # Имя новой базы данных, которую нужно создать и в которую восстановить
 NEW_DB_NAME = input(
