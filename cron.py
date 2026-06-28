@@ -68,6 +68,32 @@ def list_project_entries(lines):
     return result
 
 
+def prompt_schedule():
+    print("\nРасписание:")
+    print("1. Каждый час")
+    print("2. Каждый день")
+    print("3. Каждую неделю")
+    print("4. Своё выражение")
+    sc = input("Выберите: ").strip()
+    if sc == "1":
+        return "0 * * * *"
+    elif sc == "2":
+        h = input("Час (0-23): ").strip()
+        m = input("Минута (0-59): ").strip()
+        h = h if h.isdigit() and 0 <= int(h) <= 23 else "2"
+        m = m if m.isdigit() and 0 <= int(m) <= 59 else "0"
+        return f"{m} {h} * * *"
+    elif sc == "3":
+        d = input("День недели (0-7, где 0 и 7 = вс): ").strip()
+        d = d if d.isdigit() and 0 <= int(d) <= 7 else "0"
+        h = input("Час (0-23): ").strip()
+        h = h if h.isdigit() and 0 <= int(h) <= 23 else "3"
+        return f"0 {h} * * {d}"
+    elif sc == "4":
+        return input("Введите cron-выражение (5 полей): ").strip()
+    return None
+
+
 def cron_manager():
     while True:
         content = get_crontab()
@@ -96,18 +122,8 @@ def cron_manager():
             break
 
         elif choice == "1":
-            print("\nРасписание:")
-            print("1. Каждый час      (0 * * * *)")
-            print("2. Каждый день     (0 2 * * *)")
-            print("3. Каждую неделю   (0 3 * * 0)")
-            print("4. Своё выражение")
-            sc = input("Выберите: ").strip()
-            schedules = {"1": "0 * * * *", "2": "0 2 * * *", "3": "0 3 * * 0"}
-            if sc in schedules:
-                schedule = schedules[sc]
-            elif sc == "4":
-                schedule = input("Введите cron-выражение (5 полей): ").strip()
-            else:
+            schedule = prompt_schedule()
+            if schedule is None:
                 print("Неверный выбор.")
                 continue
 
@@ -167,18 +183,8 @@ def cron_manager():
                     continue
                 lines.pop(entry_index)
 
-                print("\nНовое расписание:")
-                print("1. Каждый час      (0 * * * *)")
-                print("2. Каждый день     (0 2 * * *)")
-                print("3. Каждую неделю   (0 3 * * 0)")
-                print("4. Своё выражение")
-                sc = input("Выберите: ").strip()
-                schedules = {"1": "0 * * * *", "2": "0 2 * * *", "3": "0 3 * * 0"}
-                if sc in schedules:
-                    schedule = schedules[sc]
-                elif sc == "4":
-                    schedule = input("Введите cron-выражение (5 полей): ").strip()
-                else:
+                schedule = prompt_schedule()
+                if schedule is None:
                     print("Неверный выбор.")
                     continue
 
