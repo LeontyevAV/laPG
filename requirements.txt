@@ -1,8 +1,5 @@
 # requirements.txt
 
 # Для загрузки переменных окружения из .env файла
-python-dotenv
-
-# Для взаимодействия с PostgreSQL (если будешь делать что-то кроме pg_dump/pg_restore)
-psycopg[binary] # psycopg 3.x с бинарными зависимостями
-# Альтернатива: psycopg2-binary
+python-dotenv>=1.2.2
+asyncpg>=0.31.0

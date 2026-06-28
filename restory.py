@@ -25,7 +25,7 @@ if not NEW_DB_NAME or not DB_HOST or not DB_SUPERUSER or not DB_SUPERUSER_PASSWO
     raise ValueError(
         "Не все необходимые переменные окружения установлены в .env файле или имя БД не введено."
     )
-
+  
 # Путь к папке с бэкапами
 BACKUP_DIR = "backup"
 

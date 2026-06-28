@@ -1,7 +1,10 @@
+import asyncio
 import subprocess
 import os
+import sys
 from datetime import datetime
 from dotenv import load_dotenv
+import asyncpg
 
 # Загружаем переменные из .env файла
 load_dotenv()
@@ -11,13 +14,51 @@ DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 
-# Имя новой базы данных, которую нужно создать и в которую восстановить
-DB_NAME = input("Введите имя новой базы данных для создания и восстановления: ").strip()
-
-if not all([DB_HOST, DB_NAME, DB_USER, DB_PASSWORD]):
+if not all([DB_HOST, DB_USER, DB_PASSWORD]):
     raise ValueError(
         "Не все необходимые переменные окружения установлены в .env файле."
     )
+
+
+async def fetch_databases():
+    conn = await asyncpg.connect(
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        database="postgres",
+    )
+    rows = await conn.fetch(
+        "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname"
+    )
+    await conn.close()
+    return [row["datname"] for row in rows]
+
+
+try:
+    databases = asyncio.run(fetch_databases())
+except asyncpg.PostgresError as e:
+    print(f"Ошибка подключения к серверу: {e}")
+    sys.exit(1)
+
+if not databases:
+    print("На сервере нет доступных баз данных.")
+    sys.exit(1)
+
+print("Доступные базы данных:")
+for i, db_name in enumerate(databases, start=1):
+    print(f"{i}. {db_name}")
+
+DB_NAME = None
+while DB_NAME is None:
+    choice = input("Введите номер базы данных для бекапа: ").strip()
+    try:
+        index = int(choice) - 1
+        if index < 0 or index >= len(databases):
+            print("Ошибка: введите номер из списка.")
+            continue
+        DB_NAME = databases[index]
+    except ValueError:
+        print("Ошибка: введите число.")
 
 # Установка переменной окружения для пароля (чтобы pg_dump не запрашивал её интерактивно)
 env = os.environ.copy()
