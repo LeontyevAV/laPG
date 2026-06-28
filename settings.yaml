@@ -1,0 +1,17 @@
+connection:
+  host: localhost
+  user: postgres
+
+backup:
+  default_compress: 0
+  default_keep: 0
+  databases: {}
+
+restore:
+  backup_dirs:
+    - backup
+    - restory
+
+scheduler:
+  enabled: false
+  cron: "0 2 * * *"
