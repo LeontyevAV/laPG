@@ -1,0 +1,9 @@
+[project]
+name = "laPG"
+version = "0.2.0"
+description = "CLI-утилита для резервного копирования и восстановления PostgreSQL баз данных"
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv>=1.2.2",
+    "asyncpg>=0.31.0",
+]
