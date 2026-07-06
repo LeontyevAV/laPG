@@ -1,17 +1,29 @@
 connection:
   host: localhost
   user: postgres
-
 backup:
   default_compress: 0
   default_keep: 0
   databases: {}
-
 restore:
   backup_dirs:
-    - backup
-    - restory
-
+  - backup
+  - restory
 scheduler:
   enabled: false
-  cron: "0 2 * * *"
+  cron: 0 2 * * *
+web:
+  enabled: false
+  host: 0.0.0.0
+  port: 8080
+remote:
+  host: 82.97.248.238
+  user: root
+  port: 22
+  pg_port: 5432
+servers:
+  - name: main
+    host: 82.97.248.238
+    user: root
+    port: 22
+    pg_port: 5432

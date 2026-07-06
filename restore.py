@@ -1,11 +1,13 @@
 import asyncio
+import socket
 import subprocess
 import os
 import sys
 import re
+import time
 import asyncpg
 from db_utils import fetch_databases
-from settings import get_settings
+from settings import get_settings, save_remote_config
 
 DB_HOST, DB_SUPERUSER, DB_SUPERUSER_PASSWORD, YAML_CFG = get_settings()
 
@@ -16,6 +18,77 @@ if not all([DB_HOST, DB_SUPERUSER, DB_SUPERUSER_PASSWORD]):
 
 env = os.environ.copy()
 env["PGPASSWORD"] = DB_SUPERUSER_PASSWORD
+
+_ssh_proc = None
+
+
+def _free_port():
+    sock = socket.socket()
+    sock.bind(("", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return port
+
+
+def _start_ssh_tunnel():
+    rc = YAML_CFG.remote
+
+    print("\nПодключение через SSH-туннель")
+    default_host = rc.host or ""
+    default_ssh_port = str(rc.port) if rc.port else "22"
+    default_pg_port = str(rc.pg_port) if rc.pg_port else "5432"
+    default_user = rc.user or "root"
+
+    prompt_host = f"  Хост [{default_host}]: " if default_host else "  Хост: "
+    ssh_host = input(prompt_host).strip() or default_host
+    if not ssh_host:
+        print("  Хост не указан.")
+        return None
+    ssh_port = input(f"  SSH порт [{default_ssh_port}]: ").strip() or default_ssh_port
+    pg_port = input(f"  Порт PostgreSQL [{default_pg_port}]: ").strip() or default_pg_port
+    ssh_user = input(f"  Пользователь [{default_user}]: ").strip() or default_user
+
+    local_port = _free_port()
+    cmd = [
+        "ssh",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-L", f"{local_port}:localhost:{pg_port}",
+        "-p", ssh_port,
+        "-N",
+        f"{ssh_user}@{ssh_host}",
+    ]
+
+    global _ssh_proc
+    print(f"  Запуск туннеля localhost:{local_port} → {ssh_host}:{pg_port}...")
+    try:
+        _ssh_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
+        if _ssh_proc.poll() is not None:
+            print(f"  Ошибка: туннель не установлен (код {_ssh_proc.returncode})")
+            _ssh_proc = None
+            return None
+        print("  ✓ Туннель установлен")
+        save_remote_config(ssh_host, ssh_user, int(ssh_port), int(pg_port))
+
+        import getpass
+        pg_pass = getpass.getpass("  Пароль PostgreSQL: ")
+        return local_port, pg_pass
+    except FileNotFoundError:
+        print("  Ошибка: ssh не найден")
+        return None
+
+
+def _stop_ssh_tunnel():
+    global _ssh_proc
+    if _ssh_proc:
+        _ssh_proc.terminate()
+        try:
+            _ssh_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _ssh_proc.kill()
+        _ssh_proc = None
+        print("  Туннель закрыт")
+        env["PGPASSWORD"] = DB_SUPERUSER_PASSWORD
 
 
 def extract_db_name_from_dump(dump_path):
@@ -68,8 +141,11 @@ def pick_dump(entries):
             print("Ошибка: введите число.")
 
 
-def run_psql(db_action, target_db):
-    cmd = [db_action, "-h", DB_HOST, "-U", DB_SUPERUSER]
+def run_psql(db_action, target_db, tunnel_port=None):
+    host = "localhost" if tunnel_port else DB_HOST
+    cmd = [db_action, "-h", host, "-U", DB_SUPERUSER]
+    if tunnel_port:
+        cmd.extend(["-p", str(tunnel_port)])
     if db_action in ("dropdb", "createdb"):
         cmd.append(target_db)
     else:
@@ -77,15 +153,18 @@ def run_psql(db_action, target_db):
     return subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
 
 
-def restore_dump(dump_path, target_db):
+def restore_dump(dump_path, target_db, tunnel_port=None):
     print(f"Восстановление из '{dump_path}' в '{target_db}'...")
+    host = "localhost" if tunnel_port else DB_HOST
     cmd = [
         "pg_restore",
-        "-h", DB_HOST,
+        "-h", host,
         "-U", DB_SUPERUSER,
         "-d", target_db,
         dump_path,
     ]
+    if tunnel_port:
+        cmd.extend(["-p", str(tunnel_port)])
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
         print("Восстановление успешно завершено.")
@@ -94,12 +173,26 @@ def restore_dump(dump_path, target_db):
 
 
 def restore_interactive():
+    # SSH tunnel
+    tunnel_port = None
+    remote_pg_pass = None
+    dest = input("Восстановить на локальном (l) или удалённом (r) сервере? [l]: ").strip().lower()
+    if dest in ("r", "remote"):
+        tunnel_result = _start_ssh_tunnel()
+        if tunnel_result is None:
+            return
+        tunnel_port, remote_pg_pass = tunnel_result
+        env["PGPASSWORD"] = remote_pg_pass
+
     try:
         databases = asyncio.run(fetch_databases(
-            host=DB_HOST, user=DB_SUPERUSER, password=DB_SUPERUSER_PASSWORD
+            host="localhost" if tunnel_port else DB_HOST,
+            user=DB_SUPERUSER, password=remote_pg_pass if remote_pg_pass else DB_SUPERUSER_PASSWORD,
+            port=tunnel_port or 5432,
         ))
     except (ConnectionError, asyncpg.PostgresError, asyncio.TimeoutError) as e:
         print(f"Ошибка подключения: {e}")
+        _stop_ssh_tunnel()
         return
 
     print("0. Создать новую БД")
@@ -123,6 +216,7 @@ def restore_interactive():
     dump_files = list_dump_files()
     if not dump_files:
         print("Не найдено файлов .dump в папках backup/ или restore/.")
+        _stop_ssh_tunnel()
         return
 
     if target_db is None:
@@ -141,14 +235,16 @@ def restore_interactive():
 
         if not target_db:
             print("Имя не может быть пустым.")
+            _stop_ssh_tunnel()
             return
 
         check_sql = f"SELECT 1 FROM pg_database WHERE datname = '{target_db}'"
         try:
-            result = run_psql("psql", check_sql)
+            result = run_psql("psql", check_sql, tunnel_port)
             db_exists = "1" in result.stdout
         except subprocess.CalledProcessError as e:
             print(f"Ошибка при проверке БД: {e.stderr}")
+            _stop_ssh_tunnel()
             return
 
         if db_exists:
@@ -156,13 +252,15 @@ def restore_interactive():
             answer = input("Перезаписать? (yes/no): ").strip().lower()
             if answer not in ("yes", "y"):
                 print("Операция отменена.")
+                _stop_ssh_tunnel()
                 return
             print(f"Удаление базы '{target_db}'...")
             try:
-                run_psql("dropdb", target_db)
+                run_psql("dropdb", target_db, tunnel_port)
                 print("База удалена.")
             except subprocess.CalledProcessError as e:
                 print(f"Ошибка при удалении: {e.stderr}")
+                _stop_ssh_tunnel()
                 return
     else:
         print(f"Целевая БД: {target_db}")
@@ -172,25 +270,29 @@ def restore_interactive():
         answer = input("Продолжить? (yes/no): ").strip().lower()
         if answer not in ("yes", "y"):
             print("Операция отменена.")
+            _stop_ssh_tunnel()
             return
 
         print(f"Удаление базы '{target_db}'...")
         try:
-            run_psql("dropdb", target_db)
+            run_psql("dropdb", target_db, tunnel_port)
             print("База удалена.")
         except subprocess.CalledProcessError as e:
             print(f"Ошибка при удалении: {e.stderr}")
+            _stop_ssh_tunnel()
             return
 
     print(f"Создание базы '{target_db}'...")
     try:
-        run_psql("createdb", target_db)
+        run_psql("createdb", target_db, tunnel_port)
         print("База создана.")
     except subprocess.CalledProcessError as e:
         print(f"Ошибка при создании: {e.stderr}")
+        _stop_ssh_tunnel()
         return
 
-    restore_dump(dump_path, target_db)
+    restore_dump(dump_path, target_db, tunnel_port)
+    _stop_ssh_tunnel()
 
 
 if __name__ == "__main__":

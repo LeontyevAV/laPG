@@ -4,9 +4,9 @@ import glob
 import asyncpg
 
 
-async def _try_connect(*, host, user, password, database):
+async def _try_connect(*, host, user, password, database, port=5432):
     conn = await asyncpg.connect(
-        host=host, user=user, password=password, database=database, timeout=5
+        host=host, user=user, password=password, database=database, port=port, timeout=5
     )
     rows = await conn.fetch(
         "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname"
@@ -15,16 +15,16 @@ async def _try_connect(*, host, user, password, database):
     return [row["datname"] for row in rows]
 
 
-async def fetch_databases(*, host, user, password):
+async def fetch_databases(*, host, user, password, port=5432):
     for db in ("postgres", "template1"):
         try:
             return await _try_connect(
-                host=host, user=user, password=password, database=db
+                host=host, user=user, password=password, database=db, port=port
             )
         except (asyncpg.PostgresError, asyncio.TimeoutError, ConnectionError):
             continue
     raise ConnectionError(
-        f"Не удалось подключиться к серверу {host}. "
+        f"Не удалось подключиться к серверу {host}:{port}. "
         "Проверьте учётные данные и доступность сервера."
     )
 

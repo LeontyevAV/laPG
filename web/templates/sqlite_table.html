@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ table }}</h1>
+<p class="muted">{{ db_path }}</p>
+
+{% if error %}
+<div class="toast toast-fail">{{ error }}</div>
+{% elif columns %}
+<div class="table-wrapper">
+<table class="table" id="table-{{ table }}">
+  <tr>
+    {% for c in columns %}<th>{{ c }}</th>{% endfor %}
+    <th></th>
+  </tr>
+  {% for row in rows %}
+  {% set rid = row.get("_rid") or row.get("id") or loop.index %}
+  <tr id="row-{{ rid }}">
+    {% for c in columns %}
+    <td>{% if row[c] is none %}NULL{% elif c in bool_cols %}{{ "✅" if row[c] else "❌" }}{% else %}{{ row[c] }}{% endif %}</td>
+    {% endfor %}
+    <td>
+      <button class="btn btn-sm btn-edit"
+        hx-get="/sqlite/{{ server_name }}/table/edit-row?path={{ db_path_enc | urlencode }}&table={{ table }}&rowid={{ rid }}"
+        hx-target="#row-{{ rid }}" hx-swap="outerHTML"
+        title="редактировать данные">&#x1F589;</button>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<p class="muted">Таблица пуста</p>
+{% endif %}
+
+<a href="/sqlite/{{ server_name }}/browse?path={{ db_path_enc | urlencode }}" class="btn">← Назад к таблицам</a>
+{% endblock %}

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>laPG</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <h2><a href="/">laPG</a></h2>
+    <nav>
+      <a href="/">Дашборд</a>
+      <a href="/servers">Серверы</a>
+      <a href="/restore">Восстановить</a>
+    </nav>
+    <hr>
+    <p class="muted">CLI: python main.py</p>
+  </aside>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

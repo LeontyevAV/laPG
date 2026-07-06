@@ -12,6 +12,8 @@ from restore import (
 )
 from settings import get_settings
 from cron import cron_manager
+from compare import compare_interactive
+from remote import show_top_processes
 
 DB_HOST, DB_USER, DB_PASSWORD, YAML_CFG = get_settings()
 
@@ -105,6 +107,20 @@ def dump_info():
         print(f"БД (из имени): {db_from_file}")
 
 
+def start_web():
+    try:
+        import uvicorn
+        from web.app import app
+        host = YAML_CFG.web.host
+        port = YAML_CFG.web.port
+        print(f"Запуск Web UI на http://{host}:{port}")
+        uvicorn.run(app, host=host, port=port)
+    except ImportError:
+        print("Ошибка: установите зависимости — pip install fastapi uvicorn jinja2")
+    except Exception as e:
+        print(f"Ошибка запуска Web UI: {e}")
+
+
 def main():
     if not all([DB_HOST, DB_USER, DB_PASSWORD]):
         print("Ошибка: проверьте connection в settings.yaml и DB_PASSWORD в .env")
@@ -112,15 +128,18 @@ def main():
 
     while True:
         print("\n--- laPG ---")
-        print("1. Бекап БД")
-        print("2. Бекап всех БД")
-        print("3. Восстановить БД")
-        print("4. Удалить БД")
-        print("5. Список бекапов")
-        print("6. Список БД на сервере")
-        print("7. Инфо о дампе")
-        print("8. Настройка cron")
-        print("0. Выход")
+        print("1.  Бекап БД")
+        print("2.  Бекап всех БД")
+        print("3.  Восстановить БД")
+        print("4.  Удалить БД")
+        print("5.  Список бекапов")
+        print("6.  Список БД на сервере")
+        print("7.  Инфо о дампе")
+        print("8.  Настройка cron")
+        print("9.  Сравнить две БД")
+        print("10. Процессы на удалённом сервере")
+        print("11. Web UI")
+        print("0.  Выход")
 
         choice = input("\nВыберите пункт: ").strip()
         print()
@@ -141,13 +160,19 @@ def main():
             dump_info()
         elif choice == "8":
             cron_manager()
+        elif choice == "9":
+            compare_interactive()
+        elif choice == "10":
+            show_top_processes()
+        elif choice == "11":
+            start_web()
         elif choice == "0":
             print("До свидания.")
             break
         else:
-            print("Неверный пункт. Введите 0-8.")
+            print("Неверный пункт. Введите 0-11.")
 
-        if choice in ("1", "2", "3", "4"):
+        if choice in ("1", "2", "3", "4", "9", "10"):
             input("\nНажмите Enter для продолжения...")
 
 

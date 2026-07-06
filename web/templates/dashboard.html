@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Дашборд</h1>
+
+<div class="cards">
+  <div class="card">
+    <div class="card-label">PostgreSQL</div>
+    <div class="card-value {% if connected %}green{% else %}red{% endif %}">
+      {{ "✅ Подключено" if connected else "❌ Нет соединения" }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-label">Диск</div>
+    <div class="card-value">{{ "%.1f"|format(disk.percent) }}%</div>
+    <div class="card-sub">{{ "%d GB"|format(disk.free // (1024**3)) }} свободно</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Бэкапов</div>
+    <div class="card-value">{{ backups|length }}</div>
+  </div>
+  <div class="card">
+    <div class="card-label">БД</div>
+    <div class="card-value">{{ databases|length }}</div>
+  </div>
+</div>
+
+<section>
+  <div class="section-header">
+    <h2>Базы данных</h2>
+    <div>
+      <button class="btn btn-sm" hx-get="/api/databases" hx-target="#db-table">Обновить</button>
+      <button class="btn btn-sm btn-primary" hx-post="/backup-all" hx-target="#result">Бэкап всех</button>
+    </div>
+  </div>
+  <div id="db-table" hx-get="/api/databases" hx-trigger="load"></div>
+</section>
+
+<section>
+  <div class="section-header">
+    <h2>Последние бэкапы</h2>
+    <button class="btn btn-sm" hx-get="/api/backups" hx-target="#backup-table">Обновить</button>
+  </div>
+  <div id="backup-table" hx-get="/api/backups" hx-trigger="load"></div>
+</section>
+
+<div id="result"></div>
+{% endblock %}

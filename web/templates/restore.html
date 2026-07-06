@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Восстановление</h1>
+
+<form hx-post="/restore" hx-target="#result" class="form">
+  <label>Целевая БД</label>
+  <select name="target_db">
+    {% for db in databases %}
+    <option value="{{ db }}">{{ db }}</option>
+    {% endfor %}
+  </select>
+  <input type="text" name="target_db" placeholder="Или введите название новой">
+
+  <label>Файл дампа</label>
+  <select name="dump_file" size="10">
+    {% for b in backups %}
+    <option value="{{ b }}">{{ b }}</option>
+    {% endfor %}
+  </select>
+
+  <div class="form-actions">
+    <button class="btn" name="action" value="preview">Превью</button>
+    <button class="btn btn-primary" name="action" value="restore">Восстановить</button>
+  </div>
+</form>
+
+<div id="result"></div>
+{% endblock %}

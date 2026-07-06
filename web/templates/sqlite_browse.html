@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>SQLite Browser</h1>
+
+<p class="muted">{{ db_path }}</p>
+
+{% if error %}
+<div class="toast toast-fail">{{ error }}</div>
+{% elif tables %}
+<h2>Таблицы</h2>
+<table class="table">
+  <tr><th>Имя</th><th></th></tr>
+  {% for t in tables %}
+  <tr>
+    <td>{{ t }}</td>
+    <td><a class="btn btn-sm btn-edit" href="/sqlite/{{ server_name }}/table?path={{ db_path_enc | urlencode }}&table={{ t }}" title="редактировать данные">&#x1F589;</a></td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Нет таблиц или база пуста</p>
+{% endif %}
+
+<a href="/servers" class="btn">← Назад к серверам</a>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Серверы</h1>
+
+<div class="cards">
+  {% for s in servers %}
+  <div class="card server-card" id="card-{{ s.name }}">
+    <div class="card-label">{{ s.name }}</div>
+    <div class="card-sub">{{ s.user }}@{{ s.host }}:{{ s.port }}</div>
+    <div id="server-{{ s.name }}" hx-get="/servers/{{ s.name }}/status" hx-trigger="load"></div>
+    <div class="server-actions">
+      <button class="btn btn-sm" hx-get="/servers/{{ s.name }}/sqlite" hx-target="#sqlite-{{ s.name }}">.db</button>
+    </div>
+    <div id="sqlite-{{ s.name }}" class="server-sqlite"></div>
+  </div>
+  {% else %}
+  <p class="muted">Нет серверов. Добавьте в <code>settings.yaml</code> → <code>servers</code>.</p>
+  {% endfor %}
+</div>
+{% endblock %}
