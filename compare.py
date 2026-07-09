@@ -39,7 +39,8 @@ async def _fetch_schema(host, user, password, db_name):
     )
     rows = await conn.fetch(
         """
-        SELECT table_name, column_name, data_type, is_nullable, column_default
+        SELECT table_name, column_name, data_type, is_nullable, column_default,
+               character_maximum_length, numeric_precision, numeric_scale
         FROM information_schema.columns
         WHERE table_schema = 'public'
         ORDER BY table_name, ordinal_position
@@ -55,6 +56,9 @@ async def _fetch_schema(host, user, password, db_name):
             "type": r["data_type"],
             "nullable": r["is_nullable"] == "YES",
             "default": r["column_default"],
+            "max_length": r["character_maximum_length"],
+            "numeric_precision": r["numeric_precision"],
+            "numeric_scale": r["numeric_scale"],
         }
     return schema
 
@@ -132,6 +136,111 @@ def _compare_common_tables(name_a, schema_a, name_b, schema_b):
 def _compare_full(name_a, schema_a, name_b, schema_b):
     _compare_tables_list(name_a, schema_a, name_b, schema_b)
     _compare_common_tables(name_a, schema_a, name_b, schema_b)
+
+
+def _col_type(info):
+    t = info["type"]
+    if t in ("character", "character varying") and info.get("max_length"):
+        t = f"{t}({info['max_length']})"
+    elif t in ("numeric", "decimal") and info.get("numeric_precision"):
+        p, s = info["numeric_precision"], info.get("numeric_scale", 0)
+        t = f"{t}({p},{s})"
+    return t
+
+
+def _col_ddl(info):
+    parts = [_col_type(info)]
+    if not info["nullable"]:
+        parts.append("NOT NULL")
+    if info["default"]:
+        parts.append(f"DEFAULT {info['default']}")
+    return " ".join(parts)
+
+
+def _sql_create_table(table, cols):
+    col_defs = ",\n  ".join(f"{c} {_col_ddl(info)}" for c, info in cols.items())
+    return f"CREATE TABLE public.{table} (\n  {col_defs}\n);"
+
+
+def _sql_drop_table(table):
+    return f"DROP TABLE IF EXISTS public.{table};"
+
+
+def _sql_add_column(table, col, info):
+    return f"ALTER TABLE public.{table}\n  ADD COLUMN {col} {_col_ddl(info)};"
+
+
+def _sql_drop_column(table, col):
+    return f"ALTER TABLE public.{table}\n  DROP COLUMN {col};"
+
+
+def _sql_alter_column(table, col, info):
+    parts = [f"ALTER TABLE public.{table}"]
+    parts.append(f"  ALTER COLUMN {col} TYPE {_col_type(info)}")
+    if not info["nullable"]:
+        parts.append(f"  ALTER COLUMN {col} SET NOT NULL")
+    else:
+        parts.append(f"  ALTER COLUMN {col} DROP NOT NULL")
+    if info["default"]:
+        parts.append(f"  ALTER COLUMN {col} SET DEFAULT {info['default']}")
+    else:
+        parts.append(f"  ALTER COLUMN {col} DROP DEFAULT")
+    return ",\n".join(parts) + ";"
+
+
+def _sql_rename_table(table, new_name):
+    return f"ALTER TABLE public.{table} RENAME TO {new_name};"
+
+
+def build_diffs(name_a, schema_a, name_b, schema_b):
+    diffs = []
+    tables_a, tables_b = set(schema_a), set(schema_b)
+    idx = [0]
+
+    def _push(tbl, col, desc, sql_to_b, sql_to_a):
+        idx[0] += 1
+        diffs.append({
+            "id": idx[0],
+            "table": tbl,
+            "column": col,
+            "description": desc,
+            "sql_to_b": sql_to_b,
+            "sql_to_a": sql_to_a,
+        })
+
+    for t in sorted(tables_a - tables_b):
+        _push(t, "", f"Только в '{name_a}'",
+              _sql_create_table(t, schema_a[t]),
+              _sql_drop_table(t))
+
+    for t in sorted(tables_b - tables_a):
+        _push(t, "", f"Только в '{name_b}'",
+              _sql_drop_table(t),
+              _sql_create_table(t, schema_b[t]))
+
+    for t in sorted(tables_a & tables_b):
+        cols_a, cols_b = schema_a[t], schema_b[t]
+        all_cols = set(cols_a) | set(cols_b)
+        for c in sorted(all_cols):
+            if c not in cols_a:
+                _push(t, c, f"Колонка только в '{name_b}'",
+                      _sql_drop_column(t, c),
+                      _sql_add_column(t, c, cols_b[c]))
+            elif c not in cols_b:
+                _push(t, c, f"Колонка только в '{name_a}'",
+                      _sql_add_column(t, c, cols_a[c]),
+                      _sql_drop_column(t, c))
+            else:
+                ca, cb = cols_a[c], cols_b[c]
+                key = ("type", "nullable", "default", "max_length", "numeric_precision", "numeric_scale")
+                ca_key = tuple(ca.get(k) for k in key)
+                cb_key = tuple(cb.get(k) for k in key)
+                if ca_key != cb_key:
+                    _push(t, c, f"Тип/атрибуты различаются",
+                          _sql_alter_column(t, c, ca),
+                          _sql_alter_column(t, c, cb))
+
+    return diffs
 
 
 def compare_interactive():

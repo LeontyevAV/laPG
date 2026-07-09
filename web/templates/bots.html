@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Сервисы</h1>
+
+<div id="bots-content">
+  <button class="btn btn-primary" hx-get="/bots/scan" hx-target="#bots-content" hx-swap="outerHTML"
+          hx-indicator="#spinner">Сканировать</button>
+  <span id="spinner" class="htmx-indicator">Сканирование...</span>
+
+  {% if not servers %}
+  <p class="muted" style="margin-top:1rem">Нет настроенных серверов. Добавьте серверы в settings.yaml.</p>
+  {% endif %}
+
+  {% for sv in servers %}
+  <div class="bot-server">
+    <h2>{{ sv.name }} <span class="muted">({{ sv.host }})</span></h2>
+    <div id="bots-{{ sv.name }}" hx-get="/bots/{{ sv.name }}/services" hx-trigger="load" hx-indicator="#spinner-{{ sv.name }}">
+      <span class="muted">Загрузка...</span>
+    </div>
+    <span id="spinner-{{ sv.name }}" class="htmx-indicator">Сканирование...</span>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

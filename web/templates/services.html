@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Проекты</h1>
+
+{% if error %}
+<div class="toast toast-fail">{{ error }}</div>
+{% endif %}
+
+<p>
+  <a href="/bots/deploy" class="btn btn-primary">+ Новый проект</a>
+</p>
+
+{% if services %}
+<table class="table" id="services-table">
+  <tr>
+    <th>Проект</th>
+    <th>Сервер</th>
+    <th>Статус</th>
+    <th>Описание</th>
+  </tr>
+  {% for s in services %}
+  <tr class="db-row" data-id="{{ s.id }}" data-href="/bots/services/{{ s.id }}">
+    <td><b>{{ s.project_name }}</b></td>
+    <td>{{ s.server_name or "—" }}</td>
+    <td>{{ s.status }}</td>
+    <td class="muted">{{ s.description or "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Нет сохранённых проектов. <a href="/bots/deploy">Создать первый</a>.</p>
+{% endif %}
+
+<script>
+document.getElementById('services-table').addEventListener('dblclick', function(e) {
+  var row = e.target.closest('.db-row');
+  if (!row) return;
+  window.location.href = row.dataset.href;
+});
+</script>
+{% endblock %}

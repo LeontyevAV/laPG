@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Cron</h1>
+
+<div id="cron-list" hx-get="/cron/list" hx-trigger="load" hx-swap="innerHTML">
+  <div class="muted">Загрузка...</div>
+</div>
+
+<div class="card" style="margin-top:1.5rem">
+  <h2>Добавить задачу</h2>
+  <form hx-post="/cron/add" hx-target="#cron-list" hx-swap="outerHTML" class="form">
+    <label>Расписание</label>
+    <select name="schedule_preset">
+      <option value="hourly">Каждый час (0 * * * *)</option>
+      <option value="daily">Каждый день</option>
+      <option value="weekly">Каждую неделю</option>
+      <option value="custom">Своё выражение</option>
+    </select>
+
+    <div id="schedule-custom" style="display:none;margin-top:.5rem">
+      <input type="text" name="schedule_custom" placeholder="0 2 * * *">
+    </div>
+
+    <div id="schedule-daily" style="display:none;margin-top:.5rem">
+      <div class="row" style="display:flex;gap:.5rem">
+        <label style="flex:1">Час (0-23): <input type="number" name="daily_hour" value="2" min="0" max="23"></label>
+        <label style="flex:1">Минута (0-59): <input type="number" name="daily_minute" value="0" min="0" max="59"></label>
+      </div>
+    </div>
+
+    <div id="schedule-weekly" style="display:none;margin-top:.5rem">
+      <div class="row" style="display:flex;gap:.5rem">
+        <label style="flex:1">День недели (0-7, 0/7=вс): <input type="number" name="weekly_day" value="0" min="0" max="7"></label>
+        <label style="flex:1">Час (0-23): <input type="number" name="weekly_hour" value="3" min="0" max="23"></label>
+      </div>
+    </div>
+
+    <label style="margin-top:.75rem">Команда</label>
+    <select name="cmd_preset">
+      <option value="backup">Бекап всех БД</option>
+      <option value="backup_keep">Бекап всех БД с ротацией</option>
+      <option value="custom">Своя команда</option>
+    </select>
+    <input type="text" name="cmd_custom" placeholder="./backup.py --all" style="margin-top:.25rem">
+
+    <div class="form-actions">
+      <button class="btn btn-primary">Добавить</button>
+    </div>
+  </form>
+</div>
+
+<script>
+document.querySelector('[name="schedule_preset"]')?.addEventListener('change', function() {
+  document.getElementById('schedule-custom').style.display = this.value === 'custom' ? '' : 'none';
+  document.getElementById('schedule-daily').style.display = this.value === 'daily' ? '' : 'none';
+  document.getElementById('schedule-weekly').style.display = this.value === 'weekly' ? '' : 'none';
+});
+document.querySelector('[name="cmd_preset"]')?.addEventListener('change', function() {
+  var inp = document.querySelector('[name="cmd_custom"]');
+  inp.style.display = this.value === 'custom' ? '' : 'none';
+});
+</script>
+{% endblock %}

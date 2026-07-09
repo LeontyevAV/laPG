@@ -22,8 +22,16 @@ remote:
   port: 22
   pg_port: 5432
 servers:
-  - name: main
-    host: 82.97.248.238
-    user: root
-    port: 22
-    pg_port: 5432
+- name: main
+  host: 82.97.248.238
+  user: root
+  port: 22
+  pg_port: 5432
+bots:
+  favorites:
+    main:
+    - abrikos-report-bot.service
+    - copying-ads-bot.service
+    - express-audit-bot.service
+    - evo-amo-webhook.service
+    - llm-service.service

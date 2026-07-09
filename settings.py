@@ -45,6 +45,10 @@ class RemoteServer(BaseModel):
     pg_port: int = 5432
 
 
+class BotConfig(BaseModel):
+    favorites: dict[str, list[str]] = {}  # server_name -> [service_names]
+
+
 class YamlConfig(BaseModel):
     connection: dict[str, str] = {"host": "localhost", "user": "postgres"}
     backup: BackupConfig = BackupConfig()
@@ -53,6 +57,7 @@ class YamlConfig(BaseModel):
     web: WebUIConfig = WebUIConfig()
     remote: RemoteServer = RemoteServer()
     servers: list[ServerProfile] = []
+    bots: BotConfig = BotConfig()
 
 
 class EnvSettings(BaseSettings):
@@ -95,5 +100,23 @@ def save_remote_config(host, user, port, pg_port, path="settings.yaml"):
     data["remote"]["user"] = user
     data["remote"]["port"] = port
     data["remote"]["pg_port"] = pg_port
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+
+def save_bot_favorite(server_name: str, service_name: str, op: str = "add", path="settings.yaml"):
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    if "bots" not in data:
+        data["bots"] = {}
+    if "favorites" not in data["bots"]:
+        data["bots"]["favorites"] = {}
+    favs = data["bots"]["favorites"].setdefault(server_name, [])
+    if op == "add":
+        if service_name not in favs:
+            favs.append(service_name)
+    elif op == "remove":
+        if service_name in favs:
+            favs.remove(service_name)
     with open(path, "w", encoding="utf-8") as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)

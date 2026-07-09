@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{% if svc %}Редактирование: {{ svc.project_name }}{% else %}Новый проект{% endif %}</h1>
+
+{% if svc %}
+<input type="hidden" id="edit_id" value="{{ svc.id }}">
+{% endif %}
+
+<div class="deploy-layout">
+  <div class="deploy-form-col">
+    <form hx-post="/bots/deploy/start" hx-target="#deploy-result" class="form" id="deploy-form">
+      {% if svc %}<input type="hidden" name="edit_id" value="{{ svc.id }}">{% endif %}
+
+      <h3>Сервер</h3>
+      <label for="server">Сервер</label>
+      <select name="server" id="server" required>
+        <option value="">— выберите сервер —</option>
+        {% for s in servers %}
+        <option value="{{ s.name }}"{% if svc and svc.server_name == s.name %} selected{% endif %}>{{ s.name }} ({{ s.user }}@{{ s.host }})</option>
+        {% endfor %}
+      </select>
+
+      <h3>Проект</h3>
+  <label for="service_name">Имя сервиса</label>
+  <input type="text" name="service_name" id="service_name" required placeholder="например copying_ads_bot"
+         value="{{ svc.project_name if svc and svc.project_name else '' }}"
+         oninput="updateCloneCmd()">
+
+      <label for="description">Описание</label>
+      <input type="text" name="description" id="description" placeholder="краткое описание (опционально)"
+             value="{{ svc.description if svc and svc.description else '' }}">
+
+      <h3>Репозиторий</h3>
+  <label for="repo_url">URL репозитория</label>
+  <input type="text" name="repo_url" id="repo_url" placeholder="https://github.com/user/repo.git (опционально)"
+         value="{{ svc.repo_url if svc and svc.repo_url else '' }}"
+         oninput="updateCloneCmd()">
+      <div class="suggestion" data-for="repo_url"></div>
+
+      <label for="git_branch">Ветка</label>
+      <input type="text" name="git_branch" id="git_branch" value="{{ svc.git_branch if svc and svc.git_branch else 'main' }}">
+
+      <h3>Пути</h3>
+      <label for="base_path">Base path</label>
+      <input type="text" name="base_path" id="base_path" value="{{ svc.base_path if svc and svc.base_path else '/home/project/bots/' }}">
+      <div class="suggestion" data-for="base_path"></div>
+
+      <label for="entry_point">Точка входа</label>
+      <input type="text" name="entry_point" id="entry_point" placeholder="main.py / bot.py / app.py"
+             value="{{ svc.entry_point if svc and svc.entry_point else '' }}">
+      <div class="suggestion" data-for="entry_point"></div>
+
+      <h3>Конфигурация сервиса</h3>
+      <label for="systemd_user">Пользователь systemd</label>
+      <input type="text" name="systemd_user" id="systemd_user" placeholder="оставьте пустым — будет имя сервиса"
+             value="{{ svc.systemd_user if svc and svc.systemd_user else '' }}">
+      <div class="suggestion" data-for="systemd_user"></div>
+
+      <label for="port">Порт</label>
+      <input type="number" name="port" id="port" placeholder="например 8080 (опционально)"
+             value="{{ svc.port if svc and svc.port else '' }}">
+      <div class="suggestion" data-for="port"></div>
+
+      <label for="extra_env">Переменные окружения</label>
+      <textarea name="extra_env" id="extra_env" rows="4" placeholder='{"BOT_TOKEN": "xxx", "LOG_LEVEL": "info"}'>{{
+        svc.extra_env if svc and svc.extra_env else ''
+      }}</textarea>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Сохранить</button>
+        {% if svc %}<a href="/bots/services" class="btn">Отмена</a>{% endif %}
+      </div>
+    </form>
+    <div id="deploy-result"></div>
+  </div>
+  <div class="deploy-service-col">
+    {% if svc %}
+    <h3>Содержимое .service</h3>
+    <pre id="service-raw-content" class="service-raw">{% if svc.status == 'deployed' and svc.server_name %}⏳ загрузка...{% else %}.service не создан{% endif %}</pre>
+    {% endif %}
+    <div class="git-clone-box" id="git-clone-box">
+      <h3>Клонирование</h3>
+      <pre class="git-clone-cmd" id="git-clone-cmd"></pre>
+      <button class="btn" onclick="copyCmd(this)">Копировать</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function applySuggestion(el) {
+  var field = el.dataset.field;
+  var value = el.dataset.value;
+  var input = document.getElementById(field);
+  if (input) input.value = value;
+}
+function copyCmd(btn) {
+  var text = btn.previousElementSibling.textContent;
+  navigator.clipboard.writeText(text).catch(function(){});
+}
+function updateCloneCmd() {
+  var cloneCmd = document.getElementById('git-clone-cmd');
+  if (!cloneCmd) return;
+  var svcName = document.getElementById('service_name')?.value || '';
+  var dirName = svcName.replace(/\.service$/, '').replace(/-/g, '_');
+  var url = document.getElementById('repo_url')?.value || '';
+  cloneCmd.textContent = url ? 'git clone ' + url + ' ' + dirName : '(URL репозитория не указан)';
+}
+
+{% if svc and svc.status == 'deployed' and svc.server_name %}
+(function() {
+  console.log('suggestions: starting fetch for {{ svc.id }}');
+  fetch('/bots/services/{{ svc.id }}/fetch-entrypoint', {method:'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var rawEl = document.getElementById('service-raw-content');
+      if (rawEl) {
+        if (data._raw_content !== undefined) {
+          rawEl.textContent = data._raw_content || '.service не создан';
+        } else {
+          rawEl.textContent = '.service не создан';
+        }
+        delete data._raw_content;
+      }
+      updateCloneCmd();
+      Object.keys(data).forEach(function(field) {
+        var value = data[field];
+        if (!value) return;
+        var input = document.getElementById(field);
+        if (!input) return;
+        var sug = document.querySelector('.suggestion[data-for="' + field + '"]');
+        if (!sug) return;
+        var current = input.value.trim();
+        var chip = document.createElement('code');
+        chip.textContent = value;
+        chip.onclick = function() { applySuggestion(chip); };
+        chip.dataset.field = field;
+        chip.dataset.value = value;
+        if (current !== '' && current !== value) {
+          chip.className = 'sug-chip sug-chip-warn';
+          chip.title = 'В .service указано: ' + value;
+        } else if (current === '') {
+          chip.className = 'sug-chip';
+        } else {
+          return;
+        }
+        sug.appendChild(chip);
+      });
+    })
+    .catch(function(e) { console.error('suggestions error', e); });
+})();
+{% endif %}
+updateCloneCmd();
+</script>
+{% endblock %}

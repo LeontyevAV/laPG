@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Сравнение баз данных</h1>
+
+<form hx-post="/compare/run" hx-target="#compare-result" class="form" id="compare-form">
+  <label for="db_a">Первая БД</label>
+  <select name="db_a" id="db_a" required>
+    <option value="">— выберите —</option>
+    {% for db in dbs %}<option value="{{ db }}">{{ db }}</option>{% endfor %}
+  </select>
+
+  <label for="db_b">Вторая БД</label>
+  <select name="db_b" id="db_b" required>
+    <option value="">— выберите —</option>
+    {% for db in dbs %}<option value="{{ db }}">{{ db }}</option>{% endfor %}
+  </select>
+
+  <label>Режим</label>
+  <select name="mode" required>
+    <option value="1">Вся структура</option>
+    <option value="2">Только таблицы</option>
+    <option value="3">Колонки в одноимённых</option>
+  </select>
+
+  <button class="btn btn-primary" type="submit">Сравнить</button>
+</form>
+
+<div id="compare-result"></div>
+{% endblock %}

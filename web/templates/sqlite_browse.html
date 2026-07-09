@@ -1,25 +1,279 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>SQLite Browser</h1>
+<div id="sqlite-browser" data-server="{{ server_name }}" data-path="{{ db_path }}" data-path-enc="{{ db_path_enc }}">
+  <h1>{{ db_file }}</h1>
+  <p class="muted">{{ db_path }}</p>
 
-<p class="muted">{{ db_path }}</p>
+  <div class="sqlite-tabs" id="sqlite-tabs">
+    <button class="tab active" data-tab="tables">Список таблиц</button>
+    <button class="tab" data-tab="sql">SQL ▸</button>
+  </div>
 
-{% if error %}
-<div class="toast toast-fail">{{ error }}</div>
-{% elif tables %}
-<h2>Таблицы</h2>
-<table class="table">
-  <tr><th>Имя</th><th></th></tr>
-  {% for t in tables %}
-  <tr>
-    <td>{{ t }}</td>
-    <td><a class="btn btn-sm btn-edit" href="/sqlite/{{ server_name }}/table?path={{ db_path_enc | urlencode }}&table={{ t }}" title="редактировать данные">&#x1F589;</a></td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}
-<p class="muted">Нет таблиц или база пуста</p>
-{% endif %}
+  <div class="sqlite-panes" id="sqlite-panes">
+    <div class="tab-pane active" id="pane-tables">
+      {% if error %}
+      <div class="toast toast-fail">{{ error }}</div>
+      {% elif tables %}
+      <table class="table" id="table-list">
+        <tr><th>Таблица</th><th style="width:1px"></th></tr>
+        {% for t in tables %}
+        <tr class="table-row" data-table="{{ t }}">
+          <td class="table-name">{{ t }}</td>
+          <td style="text-align:right"><button class="btn btn-sm btn-edit" onclick="event.stopPropagation(); openTable('{{ t }}')">&#x1F589;</button></td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}
+      <p class="muted">Нет таблиц или база пуста</p>
+      {% endif %}
+    </div>
 
-<a href="/servers" class="btn">← Назад к серверам</a>
+    <div class="tab-pane" id="pane-sql">
+      <div class="sql-editor-wrap">
+        <textarea class="sql-editor" id="sql-editor" rows="8" placeholder="Напишите SQL-запрос..." spellcheck="false"></textarea>
+      </div>
+      <button class="btn btn-primary" id="sql-run">Выполнить</button>
+      <div id="sql-result"></div>
+    </div>
+  </div>
+
+  <a href="/servers" class="btn" style="margin-top:1rem">← Назад к серверам</a>
+</div>
+
+<div id="modal-overlay" class="modal-overlay" style="display:none">
+  <div class="modal-box">
+    <textarea id="modal-textarea" rows="18"></textarea>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="modal-save">Сохранить</button>
+      <button class="btn" id="modal-close-btn">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function editCell(td) {
+  if (td.classList.contains('editing')) return;
+  var fullText = td.dataset.full;
+  if (fullText) {
+    openModal(td, fullText);
+    return;
+  }
+  var isBool = td.dataset.bool === '1';
+  var orig = td.innerText.trim();
+  td.classList.add('editing');
+  td.innerHTML = '';
+  if (isBool) {
+    var s = document.createElement('select');
+    s.innerHTML = '<option value="0">❌ 0</option><option value="1">✅ 1</option>';
+    s.value = orig === '✅' ? '1' : '0';
+    s.addEventListener('change', function() { saveCell(td, s.value); });
+    s.addEventListener('blur', function(e) { if (td.contains(e.relatedTarget)) return; saveCell(td, s.value); });
+    td.appendChild(s);
+    s.focus();
+  } else {
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = orig === 'NULL' ? '' : orig;
+    inp.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') saveCell(td, inp.value);
+      if (e.key === 'Escape') cancelEdit(td, orig);
+    });
+    inp.addEventListener('blur', function() { saveCell(td, inp.value); });
+    td.appendChild(inp);
+    inp.focus();
+    inp.select();
+  }
+}
+
+var modalCell = null;
+function openModal(td, fullText) {
+  modalCell = td;
+  document.getElementById('modal-textarea').value = fullText;
+  document.getElementById('modal-overlay').style.display = 'flex';
+  document.getElementById('modal-textarea').focus();
+}
+function closeModal() {
+  document.getElementById('modal-overlay').style.display = 'none';
+  modalCell = null;
+}
+
+function saveCell(td, val) {
+  if (td.classList.contains('saving')) return;
+  var form = new FormData();
+  form.append('path', td.dataset.path);
+  form.append('table', td.dataset.table);
+  form.append('rowid', td.dataset.rowid);
+  form.append('column', td.dataset.column);
+  form.append('value', val);
+  td.classList.add('saving');
+  fetch('/sqlite/' + td.dataset.server + '/table/update-cell', { method: 'POST', body: form })
+    .then(function(r) { return r.ok ? r.text() : Promise.reject(r.status + ' ' + r.statusText); })
+    .then(function(html) { td.outerHTML = html; })
+    .catch(function(e) { td.classList.remove('saving', 'editing'); td.innerText = val; console.error('saveCell error:', e); alert('Ошибка: ' + e); });
+}
+
+function cancelEdit(td, orig) {
+  td.classList.remove('editing');
+  td.innerText = orig;
+}
+
+function selectCell(e, td) {
+  // Don't select if entering edit mode
+  if (td.classList.contains('editing')) return;
+  document.querySelectorAll('.cell-selected').forEach(function(c) { c.classList.remove('cell-selected'); });
+  td.classList.add('cell-selected');
+  e.stopPropagation();
+}
+
+// Clear cell selection on outside click
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.dbl-edit')) {
+    document.querySelectorAll('.cell-selected').forEach(function(c) { c.classList.remove('cell-selected'); });
+  }
+});
+
+(function() {
+  const container = document.getElementById('sqlite-browser');
+  const serverName = container.dataset.server;
+  const dbPath = container.dataset.path;
+  const tabs = document.getElementById('sqlite-tabs');
+  const panes = document.getElementById('sqlite-panes');
+  const sqlEditor = document.getElementById('sql-editor');
+  const sqlRun = document.getElementById('sql-run');
+  const sqlResult = document.getElementById('sql-result');
+
+  const openTables = {};
+
+  // Tab switching
+  tabs.addEventListener('click', function(e) {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    // close-btn click is handled by the button's onclick
+    if (e.target.classList.contains('close-tab')) return;
+    switchTab(btn.dataset.tab);
+  });
+
+  function switchTab(tabId) {
+    tabs.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    panes.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    const tab = tabs.querySelector(`[data-tab="${tabId}"]`);
+    const pane = document.getElementById(`pane-${tabId}`);
+    if (tab) tab.classList.add('active');
+    if (pane) pane.classList.add('active');
+  }
+
+  // Table list: single click → highlight, double click → open
+  var tableList = document.getElementById('table-list');
+  if (tableList) {
+    tableList.addEventListener('click', function(e) {
+      var row = e.target.closest('.table-row');
+      if (!row || e.target.closest('button')) return;
+      this.querySelectorAll('.table-row').forEach(function(r) { r.classList.remove('selected'); });
+      row.classList.add('selected');
+    });
+    tableList.addEventListener('dblclick', function(e) {
+      var row = e.target.closest('.table-row');
+      if (!row) return;
+      openTable(row.dataset.table);
+    });
+  }
+
+  function openTable(tableName) {
+    if (openTables[tableName]) {
+      switchTab(tableName);
+      return;
+    }
+
+    const tabId = 'tbl-' + tableName.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // Tab button
+    const btn = document.createElement('button');
+    btn.className = 'tab';
+    btn.dataset.tab = tabId;
+    btn.innerHTML = tableName + ' <span class="close-tab" onclick="window.closeTable(\'' + tableName + '\')">&times;</span>';
+
+    // Insert before SQL tab
+    tabs.insertBefore(btn, tabs.lastElementChild);
+
+    // Pane
+    const pane = document.createElement('div');
+    pane.className = 'tab-pane';
+    pane.id = 'pane-' + tabId;
+    pane.innerHTML = '<p class="muted">Загрузка...</p>';
+    panes.appendChild(pane);
+
+    openTables[tableName] = { btn, pane, tabId };
+
+    // Load data
+    loadTable(tableName, pane);
+
+    switchTab(tabId);
+  }
+
+  function loadTable(tableName, pane) {
+    const params = new URLSearchParams({ path: dbPath, table: tableName });
+    fetch('/sqlite/' + serverName + '/table?' + params.toString())
+      .then(function(r) { return r.text(); })
+      .then(function(html) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        var tableEl = tmp.querySelector('.table-wrapper') || tmp.querySelector('table');
+        if (tableEl) {
+          pane.innerHTML = '';
+          pane.appendChild(tableEl);
+        } else {
+          pane.innerHTML = html;
+        }
+        // Wire up handlers in loaded content
+        pane.querySelectorAll('.dbl-edit').forEach(function(td) {
+          td.addEventListener('click', function(e) { selectCell(e, td); });
+          td.addEventListener('dblclick', function() { window.editCell(td); });
+        });
+      })
+      .catch(function() { pane.innerHTML = '<div class="toast toast-fail">Ошибка загрузки</div>'; });
+  }
+
+  window.closeTable = function(tableName) {
+    if (!openTables[tableName]) return;
+    var entry = openTables[tableName];
+    entry.btn.remove();
+    entry.pane.remove();
+    delete openTables[tableName];
+    // Switch to tables list
+    switchTab('tables');
+  };
+
+  // Modal handlers
+  document.getElementById('modal-save').addEventListener('click', function() {
+    if (!modalCell) return;
+    var val = document.getElementById('modal-textarea').value;
+    saveCell(modalCell, val);
+    closeModal();
+  });
+  document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+  document.getElementById('modal-textarea').addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('modal-save').click();
+    }
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // (синтаксическая подсветка отключена для корректной работы Ctrl+C)
+
+  // SQL execution
+  sqlRun.addEventListener('click', function() {
+    var sql = sqlEditor.value.trim();
+    if (!sql) return;
+    sqlResult.innerHTML = '<p class="muted">Выполнение...</p>';
+    var form = new URLSearchParams();
+    form.append('path', dbPath);
+    form.append('sql', sql);
+    fetch('/sqlite/' + serverName + '/execute-sql', { method: 'POST', body: form })
+      .then(function(r) { return r.text(); })
+      .then(function(html) { sqlResult.innerHTML = html; })
+      .catch(function() { sqlResult.innerHTML = '<div class="toast toast-fail">Ошибка выполнения</div>'; });
+  });
+})();
+</script>
 {% endblock %}

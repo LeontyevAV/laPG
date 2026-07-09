@@ -141,3 +141,8 @@ backup/
 
 # Временные файлы
 tmp/
+
+# Данные приложения
+data/*.db
+data/*.db-wal
+data/*.db-shm

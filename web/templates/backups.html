@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Бекапы</h1>
+
+<div class="backups-grid">
+  <div class="card">
+    <h2>Создать бекап</h2>
+    <div style="margin-bottom:1rem">
+      <button class="btn btn-primary" hx-post="/backup-all" hx-target="#backup-result" hx-swap="innerHTML">Бекап всех БД</button>
+    </div>
+    <label>Бекап одной БД</label>
+    <div class="row" style="display:flex;gap:.5rem">
+      <select id="backup-db-select" style="flex:1">
+        {% for db in databases %}
+        <option value="{{ db }}">{{ db }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn btn-primary" onclick="backupSingle()">Бекап</button>
+    </div>
+    <div id="backup-result" style="margin-top:.5rem"></div>
+  </div>
+
+  <div class="card">
+    <h2>Дампы</h2>
+    <div hx-get="/api/backups" hx-trigger="load" hx-swap="innerHTML">
+      <div class="muted">Загрузка...</div>
+    </div>
+  </div>
+
+  <div class="card" style="grid-column:1/-1">
+    <h2>Восстановить из дампа</h2>
+    <form hx-post="/restore" hx-target="#restore-result" class="form">
+      <label>Целевая БД</label>
+      <select name="target_db">
+        {% for db in databases %}
+        <option value="{{ db }}">{{ db }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="target_db" placeholder="Или введите название новой">
+
+      <label>Файл дампа</label>
+      <select name="dump_file" size="8">
+        {% for b in backups %}
+        <option value="{{ b }}">{{ b }}</option>
+        {% endfor %}
+      </select>
+
+      <div class="form-actions">
+        <button class="btn" name="action" value="preview">Инфо</button>
+        <button class="btn btn-primary" name="action" value="restore">Восстановить</button>
+      </div>
+    </form>
+    <div id="restore-result" style="margin-top:.5rem"></div>
+  </div>
+</div>
+
+<script>
+function backupSingle() {
+  var sel = document.getElementById('backup-db-select');
+  var db = sel.value;
+  if (!db) return;
+  htmx.ajax('POST', '/backup/' + encodeURIComponent(db), {target: '#backup-result', swap: 'innerHTML'});
+}
+</script>
+{% endblock %}

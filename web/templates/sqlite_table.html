@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+
 <h1>{{ table }}</h1>
 <p class="muted">{{ db_path }}</p>
 
@@ -7,23 +8,56 @@
 <div class="toast toast-fail">{{ error }}</div>
 {% elif columns %}
 <div class="table-wrapper">
-<table class="table" id="table-{{ table }}">
+<table class="table">
+  <colgroup>
+    <col style="width:80px">
+    {% for c in columns %}
+    {% if not loop.first %}
+      {% set ct = col_types.get(c, "") %}
+      {% if "INT" in ct or "FLOAT" in ct or "REAL" in ct or "NUMERIC" in ct or "DECIMAL" in ct or "BOOL" in ct %}
+        <col class="col-num">
+      {% else %}
+        <col>
+      {% endif %}
+    {% endif %}
+    {% endfor %}
+  </colgroup>
   <tr>
-    {% for c in columns %}<th>{{ c }}</th>{% endfor %}
-    <th></th>
+    {% for c in columns %}
+    {% set ct = col_types.get(c, "") %}
+    {% set is_num = "INT" in ct or "FLOAT" in ct or "REAL" in ct or "NUMERIC" in ct or "DECIMAL" in ct or "BOOL" in ct %}
+    <th{% if is_num %} class="col-num"{% endif %}>{{ c }}</th>
+    {% endfor %}
   </tr>
   {% for row in rows %}
   {% set rid = row.get("_rid") or row.get("id") or loop.index %}
-  <tr id="row-{{ rid }}">
+  <tr>
     {% for c in columns %}
-    <td>{% if row[c] is none %}NULL{% elif c in bool_cols %}{{ "✅" if row[c] else "❌" }}{% else %}{{ row[c] }}{% endif %}</td>
-    {% endfor %}
-    <td>
-      <button class="btn btn-sm btn-edit"
-        hx-get="/sqlite/{{ server_name }}/table/edit-row?path={{ db_path_enc | urlencode }}&table={{ table }}&rowid={{ rid }}"
-        hx-target="#row-{{ rid }}" hx-swap="outerHTML"
-        title="редактировать данные">&#x1F589;</button>
+    {% set is_bool = c in bool_cols %}
+    {% set raw = row[c] %}
+    {% set ct = col_types.get(c, "") %}
+    {% set is_num = "INT" in ct or "FLOAT" in ct or "REAL" in ct or "NUMERIC" in ct or "DECIMAL" in ct or "BOOL" in ct %}
+    {% if raw is not none and not is_num and raw|string|length > 80 %}
+      {% set display = raw|string|truncate(80, True, '...') %}
+      {% set is_truncated = true %}
+    {% else %}
+      {% set display = raw %}
+      {% set is_truncated = false %}
+    {% endif %}
+    <td class="dbl-edit {% if is_num %}col-num{% endif %}"
+        data-path="{{ db_path }}"
+        data-table="{{ table }}"
+        data-server="{{ server_name }}"
+        data-rowid="{{ rid }}"
+        data-column="{{ c }}"
+        data-bool="{{ '1' if is_bool else '0' }}"
+        {% if is_truncated %}data-full="{{ raw }}"{% endif %}
+        ondblclick="editCell(this)">
+      {% if raw is none %}NULL
+      {% elif is_bool %}{{ "✅" if raw else "❌" }}
+      {% else %}{{ display }}{% endif %}
     </td>
+    {% endfor %}
   </tr>
   {% endfor %}
 </table>
@@ -33,4 +67,6 @@
 {% endif %}
 
 <a href="/sqlite/{{ server_name }}/browse?path={{ db_path_enc | urlencode }}" class="btn">← Назад к таблицам</a>
+
+<!-- editCell/saveCell/cancelEdit defined in browse page -->
 {% endblock %}

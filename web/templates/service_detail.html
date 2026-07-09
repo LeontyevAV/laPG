@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ s.project_name }}</h1>
+<p class="muted">{{ s.server_name or "—" }} · {{ s.status }}</p>
+
+<table class="table" style="max-width:600px">
+  <tr><th style="width:200px">Сервер</th><td>{{ s.server_name or "—" }}</td></tr>
+  <tr><th>Статус</th><td>{{ s.status }}</td></tr>
+  <tr><th>Base path</th><td>{{ s.base_path }}</td></tr>
+  <tr><th>Точка входа</th><td>{{ s.entry_point or "—" }}</td></tr>
+  <tr><th>Пользователь</th><td>{{ s.systemd_user or "—" }}</td></tr>
+  <tr><th>Порт</th><td>{% if s.port %}:{{ s.port }}{% else %}—{% endif %}</td></tr>
+  <tr><th>Ветка</th><td>{{ s.git_branch }}</td></tr>
+  <tr><th>Репозиторий</th><td>{% if s.repo_url %}<a href="{{ s.repo_url }}" target="_blank">{{ s.repo_url }}</a>{% else %}—{% endif %}</td></tr>
+  {% if s.description %}
+  <tr><th>Описание</th><td>{{ s.description }}</td></tr>
+  {% endif %}
+  {% if s.extra_env %}
+  <tr><th>Переменные</th><td><pre style="margin:0;white-space:pre-wrap">{{ s.extra_env }}</pre></td></tr>
+  {% endif %}
+  <tr><th>Создан</th><td>{{ s.created_at }}</td></tr>
+  <tr><th>Изменён</th><td>{{ s.updated_at }}</td></tr>
+</table>
+
+<div id="ctl-detail" style="margin-top:1.5rem">
+  <h3>Управление сервисом</h3>
+  <div id="ctl-detail-buttons" style="display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0">
+    <button class="btn btn-sm" onclick="execCtl('daemon-reload')">🔄 daemon-reload</button>
+    <button class="btn btn-sm btn-primary" onclick="execCtl('enable-start')">▶ Включить + старт</button>
+    <button class="btn btn-sm" onclick="execCtl('restart')">⟳ Перезапустить</button>
+    <button class="btn btn-sm" onclick="execCtl('stop')">⏹ Остановить</button>
+    <button class="btn btn-sm" onclick="execCtl('status')">ℹ Статус</button>
+    <button class="btn btn-sm" onclick="execCtl('logs')">📋 Логи</button>
+  </div>
+  <div id="ctl-detail-output" class="terminal-box" style="display:none">
+    <div class="terminal-header">Выполнение</div>
+    <pre class="terminal-body" id="ctl-detail-output-text"></pre>
+    <div class="terminal-status" id="ctl-detail-status"></div>
+  </div>
+</div>
+
+<script>
+function execCtl(action) {
+  var outBox = document.getElementById('ctl-detail-output');
+  var outText = document.getElementById('ctl-detail-output-text');
+  var statusEl = document.getElementById('ctl-detail-status');
+  outBox.style.display = '';
+  outText.textContent = '$ ' + action;
+  statusEl.className = 'terminal-status terminal-status-run';
+  statusEl.textContent = '⏳ ' + action + '...';
+  fetch('/bots/services/{{ s.id }}/deploy/ctl/' + action)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        statusEl.className = 'terminal-status terminal-status-ok';
+        statusEl.textContent = '✓ Готово';
+        outText.textContent += '\n' + (data.output || '');
+      } else {
+        statusEl.className = 'terminal-status terminal-status-fail';
+        statusEl.textContent = '✗ Ошибка';
+        outText.textContent += '\n' + (data.error || '');
+      }
+    });
+}
+</script>
+
+<p style="margin-top:1rem">
+  <a href="/bots/services" class="btn">← К списку</a>
+  <a href="/bots/deploy?edit={{ s.id }}" class="btn">Редактировать</a>
+  <a href="/bots/services/{{ s.id }}/deploy" class="btn btn-primary">Deploy</a>
+  <a href="/bots/services/{{ s.id }}/check" class="btn" onclick="alert('Проверка пока не реализована');return false">Check</a>
+</p>
+{% endblock %}

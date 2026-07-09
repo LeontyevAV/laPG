@@ -2,7 +2,7 @@
 {% block content %}
 <h1>Серверы</h1>
 
-<div class="cards">
+<div class="cards" id="servers-cards">
   {% for s in servers %}
   <div class="card server-card" id="card-{{ s.name }}">
     <div class="card-label">{{ s.name }}</div>
@@ -17,4 +17,20 @@
   <p class="muted">Нет серверов. Добавьте в <code>settings.yaml</code> → <code>servers</code>.</p>
   {% endfor %}
 </div>
+
+<script>
+// db list: click → highlight, dblclick → open
+document.getElementById('servers-cards').addEventListener('click', function(e) {
+  var row = e.target.closest('.db-row');
+  if (!row || e.target.closest('a,button')) return;
+  row.closest('table').querySelectorAll('.db-row').forEach(function(r) { r.classList.remove('selected'); });
+  row.classList.add('selected');
+});
+document.getElementById('servers-cards').addEventListener('dblclick', function(e) {
+  var row = e.target.closest('.db-row');
+  if (!row) return;
+  var link = row.querySelector('.btn-edit');
+  if (link) window.location.href = link.getAttribute('href');
+});
+</script>
 {% endblock %}
