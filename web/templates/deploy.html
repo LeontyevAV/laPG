@@ -46,9 +46,24 @@
       <div class="suggestion" data-for="base_path"></div>
 
       <label for="entry_point">Точка входа</label>
-      <input type="text" name="entry_point" id="entry_point" placeholder="main.py / bot.py / app.py"
-             value="{{ svc.entry_point if svc and svc.entry_point else '' }}">
-      <div class="suggestion" data-for="entry_point"></div>
+    <input type="text" name="entry_point" id="entry_point" placeholder="main.py / bot.py / app.py"
+           value="{{ svc.entry_point if svc and svc.entry_point else '' }}">
+    <div class="suggestion" data-for="entry_point"></div>
+
+      <h3>База данных</h3>
+      <label for="db_type">Тип СУБД</label>
+      <select name="db_type" id="db_type" onchange="onDbTypeChange()">
+        <option value="">— без базы данных —</option>
+        <option value="postgresql"{% if svc and svc.db_type == 'postgresql' %} selected{% endif %}>PostgreSQL</option>
+        <option value="sqlite"{% if svc and svc.db_type == 'sqlite' %} selected{% endif %}>SQLite</option>
+      </select>
+
+      <div id="db-fields"{% if not svc or not svc.db_type %} style="display:none"{% endif %}>
+      <label for="db_name">База данных</label>
+      <input type="text" name="db_name" id="db_name" placeholder="имя БД или полный путь к .db"
+             value="{{ svc.db_name if svc and svc.db_name else '' }}">
+      <div id="sqlite-suggestions" class="suggestion" style="display:none"></div>
+      </div>
 
       <h3>Конфигурация сервиса</h3>
       <label for="systemd_user">Пользователь systemd</label>
@@ -92,6 +107,34 @@ function applySuggestion(el) {
   var value = el.dataset.value;
   var input = document.getElementById(field);
   if (input) input.value = value;
+}
+function applySqLite(el) {
+  document.getElementById('db_name').value = el.dataset.value;
+}
+function onDbTypeChange() {
+  var type = document.getElementById('db_type').value;
+  var dbFields = document.getElementById('db-fields');
+  var sugDiv = document.getElementById('sqlite-suggestions');
+  if (!type) {
+    dbFields.style.display = 'none';
+    return;
+  }
+  dbFields.style.display = '';
+  if (type === 'sqlite') {
+    sugDiv.style.display = '';
+    var server = document.getElementById('server').value;
+    var basePath = document.getElementById('base_path').value;
+    if (server && basePath) {
+      fetch('/bots/sqlite-files?server=' + encodeURIComponent(server) + '&path=' + encodeURIComponent(basePath))
+        .then(function(r) { return r.text(); })
+        .then(function(html) { sugDiv.innerHTML = html; });
+    } else {
+      sugDiv.innerHTML = '<span class="muted">Укажите сервер и base path</span>';
+    }
+  } else {
+    sugDiv.style.display = 'none';
+    sugDiv.innerHTML = '';
+  }
 }
 function copyCmd(btn) {
   var text = btn.previousElementSibling.textContent;
@@ -150,5 +193,6 @@ function updateCloneCmd() {
 })();
 {% endif %}
 updateCloneCmd();
+onDbTypeChange();
 </script>
 {% endblock %}

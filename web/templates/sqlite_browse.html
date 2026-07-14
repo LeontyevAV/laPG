@@ -19,7 +19,7 @@
         {% for t in tables %}
         <tr class="table-row" data-table="{{ t }}">
           <td class="table-name">{{ t }}</td>
-          <td style="text-align:right"><button class="btn btn-sm btn-edit" onclick="event.stopPropagation(); openTable('{{ t }}')">&#x1F589;</button></td>
+          <td style="text-align:right;white-space:nowrap"><button class="btn btn-sm copy-tbl-name" data-name="{{ t }}" title="Копировать имя"></button> <button class="btn btn-sm btn-edit" onclick="event.stopPropagation(); openTable('{{ t }}')">&#x1F589;</button></td>
         </tr>
         {% endfor %}
       </table>
@@ -233,6 +233,33 @@ document.addEventListener('click', function(e) {
       .catch(function() { pane.innerHTML = '<div class="toast toast-fail">Ошибка загрузки</div>'; });
   }
 
+  function getActiveTableName() {
+    var activeTab = tabs.querySelector('.tab.active');
+    if (!activeTab) return null;
+    var tabId = activeTab.dataset.tab;
+    for (var name in openTables) {
+      if (openTables[name].tabId === tabId) return name;
+    }
+    return null;
+  }
+
+  window.refreshTable = function(btn) {
+    var name = getActiveTableName();
+    if (!name) return;
+    var entry = openTables[name];
+    if (!entry) return;
+    var pane = entry.pane;
+    pane.innerHTML = '<p class="muted">Загрузка...</p>';
+    loadTable(name, pane);
+  };
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'F5') {
+      e.preventDefault();
+      window.refreshTable();
+    }
+  });
+
   window.closeTable = function(tableName) {
     if (!openTables[tableName]) return;
     var entry = openTables[tableName];
@@ -273,6 +300,24 @@ document.addEventListener('click', function(e) {
       .then(function(r) { return r.text(); })
       .then(function(html) { sqlResult.innerHTML = html; })
       .catch(function() { sqlResult.innerHTML = '<div class="toast toast-fail">Ошибка выполнения</div>'; });
+  });
+
+  window.openTable = openTable;
+  window.closeTable = closeTable;
+
+  var copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  document.querySelectorAll('.copy-tbl-name').forEach(function(btn) {
+    btn.innerHTML = copyIcon;
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var name = this.dataset.name;
+      if (!name) return;
+      navigator.clipboard.writeText(name);
+      var orig = this.innerHTML;
+      this.textContent = '\u2713';
+      var self = this;
+      setTimeout(function() { self.innerHTML = orig; }, 1000);
+    });
   });
 })();
 </script>

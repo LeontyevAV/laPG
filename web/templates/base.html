@@ -6,23 +6,25 @@
   <title>laPG</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <aside class="sidebar">
     <h2><a href="/">laPG</a></h2>
-    <nav>
-      <a href="/">Дашборд</a>
-      <a href="/backups">Бекапы</a>
-      <a href="/servers">Серверы</a>
-      <a href="/cron">Cron</a>
-      <a href="/bots">Сервисы</a>
-      <a href="/bots/services">Проекты</a>
-      <a href="/tools">Инструменты</a>
-      <a href="/compare">Сравнение БД</a>
-    </nav>
-    <hr>
-    <p class="muted">CLI: python main.py</p>
+    <div class="sidebar-scroll">
+      <nav>
+        <a href="/">Дашборд</a>
+        <a href="/backups">Бекапы</a>
+        <a href="/servers">Серверы</a>
+        <a href="/cron">Cron</a>
+        <a href="/bots">Сервисы</a>
+        <a href="/bots/services">Проекты</a>
+        <a href="/tools">Инструменты</a>
+        <a href="/compare">Сравнение БД</a>
+      </nav>
+      <hr>
+      <p class="muted">CLI: python main.py</p>
+    </div>
   </aside>
   <main class="main">
     {% block content %}{% endblock %}
@@ -31,21 +33,36 @@
     <div id="modal-content"></div>
   </div>
   <script>
-  function addTermCopyButtons() {
+  function addTermButtons() {
     var headers = document.querySelectorAll('.terminal-header');
     for (var i = 0; i < headers.length; i++) {
-      if (headers[i].querySelector('.term-copy')) continue;
-      var btn = document.createElement('button');
-      btn.className = 'term-copy';
-      btn.title = 'Копировать вывод';
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-      headers[i].appendChild(btn);
+      var h = headers[i];
+      if (!h.querySelector('.term-copy')) {
+        var copy = document.createElement('button');
+        copy.className = 'term-copy';
+        copy.title = 'Копировать вывод';
+        copy.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+
+        if (h.matches('[data-no-close]')) {
+          h.appendChild(copy);
+        } else {
+          var close = document.createElement('button');
+          close.className = 'term-copy term-close';
+          close.title = 'Закрыть';
+          close.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+          var g = document.createElement('div');
+          g.style.cssText = 'display:flex;gap:.3rem';
+          g.appendChild(copy);
+          g.appendChild(close);
+          h.appendChild(g);
+        }
+      }
     }
   }
 
   document.addEventListener('DOMContentLoaded', function() {
-    addTermCopyButtons();
-    var obs = new MutationObserver(addTermCopyButtons);
+    addTermButtons();
+    var obs = new MutationObserver(addTermButtons);
     obs.observe(document.body, { childList: true, subtree: true });
   });
 
@@ -54,6 +71,14 @@
     if (!btn) return;
     var box = btn.closest('.terminal-box');
     if (!box) return;
+
+    // Close button
+    if (btn.classList.contains('term-close')) {
+      box.style.display = 'none';
+      return;
+    }
+
+    // Copy button
     var body = box.querySelector('.terminal-body');
     if (!body) return;
     var text = body.textContent;

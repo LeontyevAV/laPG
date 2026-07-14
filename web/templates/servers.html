@@ -10,6 +10,7 @@
     <div id="server-{{ s.name }}" hx-get="/servers/{{ s.name }}/status" hx-trigger="load"></div>
     <div class="server-actions">
       <button class="btn btn-sm" hx-get="/servers/{{ s.name }}/sqlite" hx-target="#sqlite-{{ s.name }}">.db</button>
+      <a href="/servers/{{ s.name }}/users" class="btn btn-sm">Пользователи</a>
     </div>
     <div id="sqlite-{{ s.name }}" class="server-sqlite"></div>
   </div>

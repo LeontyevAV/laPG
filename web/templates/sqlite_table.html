@@ -8,6 +8,9 @@
 <div class="toast toast-fail">{{ error }}</div>
 {% elif columns %}
 <div class="table-wrapper">
+<div class="table-toolbar">
+  <button class="btn btn-sm btn-primary" onclick="refreshTable(this)" title="F5">Обновить</button>
+</div>
 <table class="table">
   <colgroup>
     <col style="width:80px">

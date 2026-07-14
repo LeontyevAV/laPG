@@ -10,14 +10,18 @@ body {
 }
 .sidebar {
   width: 220px; background: var(--surface); border-right: 1px solid var(--border);
-  padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem;
+  display: flex; flex-direction: column;
+  position: fixed; top: 0; left: 0; height: 100vh; z-index: 100;
 }
+.sidebar h2 { flex-shrink: 0; padding: 1.5rem 1.5rem 0; }
 .sidebar h2 a { text-decoration: none; color: var(--text); }
+.sidebar-scroll { flex: 1; overflow-y: auto; padding: 1rem 1.5rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
 .sidebar nav { display: flex; flex-direction: column; gap: .5rem; }
 .sidebar nav a { color: var(--primary); text-decoration: none; }
-.main { flex: 1; padding: 2rem; max-width: 960px; }
+.main { flex: 1; margin-left: 220px; padding: 2rem; }
 
 h1 { margin-bottom: 1.5rem; }
+h1:first-child { position: sticky; top: 0; z-index: 10; background: var(--bg); margin: -2rem 0 1.5rem; padding: 2rem 0 1.5rem; }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
 .card {
@@ -103,7 +107,7 @@ pre { font-size: .85rem; }
 .term-copy { background: none; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; font-size: .8rem; padding: .1rem .3rem; line-height: 1; color: #6b7280; display: inline-flex; align-items: center; }
 .term-copy:hover { background: #d1d5db; color: #111827; }
 .terminal-body { background: #1e1e2e; color: #cdd6f4; padding: .75rem 1rem; font-size: .82rem; white-space: pre-wrap; margin: 0; overflow-x: auto; min-height: 3rem; }
-.terminal-status { padding: .4rem .75rem; font-size: .82rem; font-weight: 600; }
+.terminal-status { padding: .4rem .75rem; font-size: .82rem; font-weight: 600; display: flex; align-items: center; gap: .5rem; }
 .terminal-status-run { background: #fef3c7; color: #92400e; }
 .terminal-status-ok { background: #dcfce7; color: #166534; }
 .terminal-status-fail { background: #fef2f2; color: #991b1b; }
@@ -136,6 +140,8 @@ pre { font-size: .85rem; }
 }
 .sqlite-tabs .tab:hover { color: var(--text); }
 .sqlite-tabs .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+td .copy-tbl-name { margin-right: .3rem; }
+.table-toolbar { display: flex; gap: .4rem; margin-bottom: .5rem; }
 .close-tab { margin-left: .4rem; color: var(--muted); font-weight: bold; cursor: pointer; }
 .close-tab:hover { color: var(--fail); }
 .tab-pane { display: none; }

@@ -8,6 +8,8 @@
   <tr><th>Статус</th><td>{{ s.status }}</td></tr>
   <tr><th>Base path</th><td>{{ s.base_path }}</td></tr>
   <tr><th>Точка входа</th><td>{{ s.entry_point or "—" }}</td></tr>
+  <tr><th>Тип СУБД</th><td>{{ s.db_type or "—" }}</td></tr>
+  <tr><th>База данных</th><td>{{ s.db_name or "—" }}</td></tr>
   <tr><th>Пользователь</th><td>{{ s.systemd_user or "—" }}</td></tr>
   <tr><th>Порт</th><td>{% if s.port %}:{{ s.port }}{% else %}—{% endif %}</td></tr>
   <tr><th>Ветка</th><td>{{ s.git_branch }}</td></tr>
@@ -53,6 +55,33 @@ function execCtl(action) {
     .then(function(data) {
       if (data.ok) {
         statusEl.className = 'terminal-status terminal-status-ok';
+        statusEl.innerHTML = '✓ Готово' + (action === 'logs'
+          ? '<button class="term-copy" onclick="execCtl(\'logs\')" style="margin-left:auto" title="Обновить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>'
+          : '');
+        outText.textContent += '\n' + (data.output || '');
+      } else {
+        statusEl.className = 'terminal-status terminal-status-fail';
+        statusEl.textContent = '✗ Ошибка';
+        outText.textContent += '\n' + (data.error || '');
+      }
+    });
+}
+</script>
+
+<script>
+function execGitPull() {
+  var outBox = document.getElementById('detail-git-output');
+  var outText = document.getElementById('detail-git-text');
+  var statusEl = document.getElementById('detail-git-status');
+  outBox.style.display = '';
+  outText.textContent = '$ git pull';
+  statusEl.className = 'terminal-status terminal-status-run';
+  statusEl.textContent = '⏳ Выполняется...';
+  fetch('/bots/services/{{ s.id }}/deploy/git-pull', {method:'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        statusEl.className = 'terminal-status terminal-status-ok';
         statusEl.textContent = '✓ Готово';
         outText.textContent += '\n' + (data.output || '');
       } else {
@@ -68,6 +97,12 @@ function execCtl(action) {
   <a href="/bots/services" class="btn">← К списку</a>
   <a href="/bots/deploy?edit={{ s.id }}" class="btn">Редактировать</a>
   <a href="/bots/services/{{ s.id }}/deploy" class="btn btn-primary">Deploy</a>
-  <a href="/bots/services/{{ s.id }}/check" class="btn" onclick="alert('Проверка пока не реализована');return false">Check</a>
+  <button class="btn" onclick="execGitPull()">Обновить репо</button>
+  <a href="/bots/services/{{ s.id }}/check" class="btn" onclick="alert('Check not implemented');return false">Check</a>
 </p>
+<div id="detail-git-output" class="terminal-box" style="display:none;margin-top:.5rem">
+  <div class="terminal-header">Обновление репозитория</div>
+  <pre class="terminal-body" id="detail-git-text"></pre>
+    <div class="terminal-status" id="detail-git-status"></div>
+  </div>
 {% endblock %}

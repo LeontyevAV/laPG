@@ -47,6 +47,10 @@ def init_db():
     cols = {row[1] for row in conn.execute("PRAGMA table_info(_services)").fetchall()}
     if "server_name" not in cols:
         conn.execute("ALTER TABLE _services ADD COLUMN server_name TEXT")
+    if "db_type" not in cols:
+        conn.execute("ALTER TABLE _services ADD COLUMN db_type TEXT DEFAULT 'postgresql'")
+    if "db_name" not in cols:
+        conn.execute("ALTER TABLE _services ADD COLUMN db_name TEXT")
     conn.commit()
     conn.close()
 

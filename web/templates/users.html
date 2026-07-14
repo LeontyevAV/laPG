@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Пользователи: {{ server.name }}</h1>
+<p class="muted">{{ server.user }}@{{ server.host }}:{{ server.port }}</p>
+
+{% if users %}
+<table class="table" style="max-width:100%">
+  <tr>
+    <th>Пользователь</th>
+    <th>UID</th>
+    <th>GID</th>
+    <th>Домашняя</th>
+    <th>Shell</th>
+    <th>Группы</th>
+    <th>Статус</th>
+    <th></th>
+  </tr>
+  {% for u in users %}
+  <tr>
+    <td><b>{{ u.username }}</b></td>
+    <td>{{ u.uid }}</td>
+    <td>{{ u.gid }}</td>
+    <td class="muted">{{ u.home }}</td>
+    <td class="muted">{{ u.shell }}</td>
+    <td class="muted" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ u.groups }}">{{ u.groups }}</td>
+    <td>{% if u.locked %}<span class="badge badge-red">Заблокирован</span>{% else %}<span class="badge badge-green">Активен</span>{% endif %}</td>
+    <td>
+      <button class="btn btn-sm {{ 'btn-primary' if u.locked else '' }}"
+              hx-post="/servers/{{ server.name }}/users/{{ u.username }}/toggle-lock"
+              hx-target="#result" hx-swap="innerHTML">
+        {{ 'Разблокировать' if u.locked else 'Заблокировать' }}
+      </button>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Нет пользователей.</p>
+{% endif %}
+
+<div id="result" style="margin-top:1rem"></div>
+
+<p style="margin-top:2rem"><a href="/servers" class="btn">← К серверам</a></p>
+{% endblock %}

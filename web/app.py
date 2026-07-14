@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import shlex
 import subprocess
 import urllib.parse
 import contextlib
@@ -1019,6 +1020,107 @@ def _parse_svc_props(text):
     return info
 
 
+@app.get("/servers/{name}/users", response_class=HTMLResponse)
+async def server_users(request: Request, name: str):
+    server = next((s for s in YAML_CFG.servers if s.name == name), None)
+    if not server:
+        return HTMLResponse("Сервер не найден", status_code=404)
+
+    # get all users (single SSH call)
+    result = _ssh_run_cmd(server, "getent passwd | awk -F: '$3>=100 && $3!=65534{print $1\":\"$3\":\"$4\":\"$6\":\"$7}'")
+    if not result or not result[0].strip():
+        return templates.TemplateResponse(request, "users.html", {"server": server, "users": []})
+
+    raw_users = [l.strip() for l in result[0].strip().split("\n") if l.strip()]
+
+    # get groups + passwd status for all users (single SSH call)
+    usernames = " ".join(u.split(":")[0] for u in raw_users)
+    info_cmd = f"""
+for u in {usernames}; do
+  g=$(groups $u 2>/dev/null)
+  p=$(passwd -S $u 2>/dev/null)
+  echo "$u|$g|$p"
+done
+"""
+    info_result = _ssh_run_cmd(server, info_cmd.strip())
+    info_map = {}
+    if info_result and info_result[0].strip():
+        for line in info_result[0].strip().split("\n"):
+            parts = line.strip().split("|", 2)
+            if len(parts) == 3:
+                info_map[parts[0]] = (parts[1], parts[2])
+
+    users = []
+    for line in raw_users:
+        fields = line.split(":")
+        if len(fields) >= 5:
+            u = {"username": fields[0], "uid": fields[1], "gid": fields[2], "home": fields[3], "shell": fields[4]}
+            u["groups"] = ""
+            u["locked"] = False
+            if fields[0] in info_map:
+                g, p = info_map[fields[0]]
+                if g:
+                    gg = g.split(":", 1)
+                    u["groups"] = gg[-1].strip() if len(gg) > 1 else g
+                if p:
+                    st = p.strip().split()
+                    u["locked"] = len(st) >= 2 and st[1] == "L"
+            users.append(u)
+
+    return templates.TemplateResponse(request, "users.html", {"server": server, "users": users})
+
+
+@app.post("/servers/{name}/users/{username}/toggle-lock", response_class=HTMLResponse)
+async def user_toggle_lock(name: str, username: str):
+    server = next((s for s in YAML_CFG.servers if s.name == name), None)
+    if not server:
+        return '<div class="toast toast-fail">Сервер не найден</div>'
+
+    # check current state
+    ps = _ssh_run_cmd(server, f"passwd -S {username} 2>/dev/null")
+    locked = False
+    if ps and ps[0]:
+        st = ps[0].strip().split()
+        locked = len(st) >= 2 and st[1] == "L"
+
+    action = "usermod -U" if locked else "sudo usermod -L"
+    result = _ssh_run_cmd(server, f"{action} {username} 2>&1")
+    if result is None:
+        return '<div class="toast toast-fail">SSH недоступен</div>'
+    stdout, stderr, rc = result
+    if rc == 0:
+        new_state = "разблокирован" if locked else "заблокирован"
+        return f'<div class="toast toast-ok">Пользователь {username} {new_state}</div>'
+    else:
+        return f'<div class="toast toast-fail">{(stderr or stdout).strip()}</div>'
+
+
+@app.post("/api/exec")
+async def api_exec(request: Request):
+    import json as _json
+    try:
+        body = _json.loads(await request.body())
+    except Exception:
+        return {"error": "Invalid JSON"}
+
+    server_name = body.get("server", "")
+    cwd = body.get("cwd", "")
+    command = body.get("command", "")
+
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return {"error": "Сервер не найден"}
+    if not command:
+        return {"error": "Пустая команда"}
+
+    full_cmd = f"cd {cwd} 2>/dev/null; " + command if cwd else command
+    result = _ssh_run_cmd(server, full_cmd)
+    if result is None:
+        return {"error": "SSH недоступен"}
+    stdout, stderr, rc = result
+    return {"output": stdout + stderr, "rc": rc}
+
+
 @app.get("/bots", response_class=HTMLResponse)
 async def bots_page(request: Request):
     return templates.TemplateResponse(request, "bots.html", {"servers": YAML_CFG.servers})
@@ -1028,13 +1130,6 @@ async def bots_page(request: Request):
 async def services_list(request: Request):
     return templates.TemplateResponse(request, "services.html", {"services": list_services()})
 
-
-@app.get("/bots/services/{service_id}", response_class=HTMLResponse)
-async def service_detail(request: Request, service_id: int):
-    s = get_service(service_id)
-    if not s:
-        return templates.TemplateResponse(request, "services.html", {"services": list_services(), "error": "Сервис не найден"})
-    return templates.TemplateResponse(request, "service_detail.html", {"s": s})
 
 
 @app.get("/bots/services/{service_id}/deploy", response_class=HTMLResponse)
@@ -1050,7 +1145,7 @@ def _deploy_paths(s):
     svc_name = s.get("project_name", "")
     dir_name = svc_name.replace(".service", "").replace("-", "_")
     base_last = raw_base.rstrip("/").rsplit("/", 1)[-1] if "/" in raw_base.rstrip("/") else ""
-    if base_last == dir_name and base_last:
+    if base_last.replace("-", "_") == dir_name and base_last:
         base = raw_base.rstrip("/").rsplit("/", 1)[0] + "/"
         target = dir_name
         full_path = (base + dir_name).rstrip("/")
@@ -1118,8 +1213,7 @@ async def _run_git(service_id: int, pull: bool):
     if pull:
         cmd = (
             f"git config --global --add safe.directory {full_path} 2>/dev/null; "
-            f"cd {full_path} && "
-            f"(git stash 2>/dev/null; git pull 2>&1; git stash drop 2>/dev/null)"
+            f"cd {full_path} && git pull 2>&1"
         )
     else:
         cmd = f"cd {base} && git clone {url} {target} 2>&1"
@@ -1134,6 +1228,101 @@ async def _run_git(service_id: int, pull: bool):
         return {"ok": True, "output": output or "Готово"}
     else:
         return {"ok": False, "error": output or f"Ошибка (rc={rc})"}
+
+
+@app.post("/bots/services/{service_id}/check-perms")
+async def check_perms(service_id: int):
+    s = get_service(service_id)
+    if not s:
+        return {"ok": False, "error": "Сервис не найден"}
+    server = next((sv for sv in YAML_CFG.servers if sv.name == s.get("server_name")), None)
+    if not server:
+        return {"ok": False, "error": "Сервер не найден"}
+    _, _, _, full_path = _deploy_paths(s)
+    user = (s.get("systemd_user") or s.get("project_name", "")).strip()
+    exclude = "! -path '*/.git/*' ! -path '*/venv/*'"
+
+    def try_sudo(test_flag):
+        cmd = f"sudo -u {user} find {full_path} {test_flag} {exclude} 2>&1 | head -50"
+        r = _ssh_quick_cmd(server, cmd, timeout=15)
+        if r is None or r[2] == 255:
+            return None
+        return (r[0] + r[1]).strip()
+
+    def try_fallback(test_flag):
+        cmd = f"find {full_path} {test_flag} {exclude} 2>/dev/null | head -50"
+        r = _ssh_quick_cmd(server, cmd, timeout=15)
+        if r is None or r[2] == 255:
+            return None
+        return (r[0] + r[1]).strip()
+
+    unreadable = try_sudo("-not -readable")
+    if unreadable is None:
+        unreadable = try_fallback("! -perm /o+r")
+        warn_read = "sudo недоступен, проверка по world-битам"
+    else:
+        warn_read = None
+
+    unwritable = try_sudo("-type d -not -writable")
+    if unwritable is None:
+        unwritable = try_fallback("-type d ! -perm /o+w")
+        warn_write = "sudo недоступен, проверка по world-битам"
+    else:
+        warn_write = None
+
+    if unreadable is None and unwritable is None:
+        return {"ok": False, "error": "SSH недоступен"}
+
+    lines = []
+    if warn_read:
+        lines.append(f"⚠ {warn_read}")
+    if warn_write:
+        lines.append(f"⚠ {warn_write}")
+
+    if unreadable:
+        lines.append(f"❌ Нет доступа на чтение ({user}):\n{unreadable}")
+    if unwritable:
+        lines.append(f"❌ Нет доступа на запись — директории ({user}):\n{unwritable}")
+
+    if not unreadable and not unwritable:
+        if warn_read or warn_write:
+            msg = "✅ Все права в порядке"
+            if warn_read:
+                msg += f"\n⚠ {warn_read}"
+            if warn_write:
+                msg += f"\n⚠ {warn_write}"
+            return {"ok": True, "output": msg}
+        return {"ok": True, "output": f"✅ Все права в порядке для пользователя {user}"}
+
+    return {"ok": True, "output": "\n\n".join(lines)}
+
+
+@app.post("/bots/services/{service_id}/fix-perms")
+async def fix_perms(service_id: int):
+    s = get_service(service_id)
+    if not s:
+        return {"ok": False, "error": "Сервис не найден"}
+    server = next((sv for sv in YAML_CFG.servers if sv.name == s.get("server_name")), None)
+    if not server:
+        return {"ok": False, "error": "Сервер не найден"}
+    _, _, _, full_path = _deploy_paths(s)
+    user = (s.get("systemd_user") or s.get("project_name", "")).strip()
+    exclude = "! -path '*/.git/*' ! -path '*/venv/*'"
+    cmd = (
+        f"echo '--- chown {user}:{user} ---' && "
+        f"sudo chown -R {user}:{user} {full_path} 2>&1 && "
+        f"echo '--- chmod u+wx на директории ---' && "
+        f"find {full_path} -type d {exclude} -exec chmod u+wx {{}} \\; 2>&1 && "
+        f"echo 'Готово'"
+    )
+    result = _ssh_quick_cmd(server, cmd, timeout=60)
+    if result is None:
+        return {"ok": False, "error": "SSH недоступен"}
+    stdout, stderr, rc = result
+    output = (stdout + stderr).strip()
+    if rc == 0:
+        return {"ok": True, "output": f"Права исправлены для пользователя {user}:\n{output}"}
+    return {"ok": False, "error": output or f"Ошибка (rc={rc})"}
 
 
 @app.get("/bots/services/{service_id}/deploy/venv-status")
@@ -1548,6 +1737,10 @@ async def service_ctl(service_id: int, action: str):
     stdout, stderr, rc = result
     output = (stdout + stderr).strip()
     ok = rc == 0 or action in ("status", "logs")
+
+    if action == "status" and "active (running)" in output:
+        update_service(service_id, status="deployed")
+
     return {"ok": ok, "output": output or ("" if ok else f"Ошибка (rc={rc})")}
 
 
@@ -1739,6 +1932,9 @@ async def deploy_start(request: Request):
         except _json.JSONDecodeError:
             return '<div class="toast toast-fail">Переменные окружения: неверный JSON</div>'
 
+    db_type = form.get("db_type", "").strip() or None
+    db_name = form.get("db_name", "").strip() or None
+
     edit_id = form.get("edit_id", "").strip()
 
     try:
@@ -1756,6 +1952,8 @@ async def deploy_start(request: Request):
                 git_branch=git_branch,
                 description=description,
                 extra_env=extra_env,
+                db_type=db_type,
+                db_name=db_name,
             )
             msg = f'Сервис «{service_name}» обновлён  <a href="/bots/services/{edit_id}" class="btn btn-sm">Открыть</a>'
         else:
@@ -1770,11 +1968,38 @@ async def deploy_start(request: Request):
                 git_branch=git_branch,
                 description=description,
                 extra_env=extra_env,
+                db_type=db_type,
+                db_name=db_name,
             )
             msg = f'Сервис «{service_name}» сохранён (id={svc_id})  <a href="/bots/services" class="btn btn-sm">К списку</a>'
         return f'<div class="toast toast-ok">{msg}</div>'
     except Exception as e:
         return f'<div class="toast toast-fail">Ошибка: {e}</div>'
+
+
+@app.get("/bots/sqlite-files", response_class=HTMLResponse)
+async def sqlite_files(server: str, path: str):
+    srv = next((s for s in YAML_CFG.servers if s.name == server), None)
+    if not srv:
+        return '<span class="muted">Сначала выберите сервер</span>'
+    if not path:
+        return '<span class="muted">Укажите base path</span>'
+    result = _ssh_run_cmd(srv, f"find {shlex.quote(path)} -type f -name '*.db' 2>/dev/null | head -30")
+    if not result:
+        return '<span class="muted">Не удалось подключиться к серверу</span>'
+    out, err, rc = result
+    if rc != 0 or not out.strip():
+        return '<span class="muted">.db файлы не найдены</span>'
+    files = [f.strip() for f in out.strip().split('\n') if f.strip()]
+    chips = '<span style="font-size:.85rem;color:var(--muted)">Найдены .db файлы:</span>'
+    for f in files:
+        chips += f'<code class="sug-chip" onclick="applySqLite(this)" data-value="{f}">{f}</code>'
+    return chips
+
+
+@app.get("/pg-stub", response_class=HTMLResponse)
+async def pg_stub(request: Request, server: str, db: str):
+    return templates.TemplateResponse(request, "pg_stub.html", {"server": server, "db": db})
 
 
 @app.get("/bots/scan", response_class=HTMLResponse)

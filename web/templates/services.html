@@ -6,11 +6,22 @@
 <div class="toast toast-fail">{{ error }}</div>
 {% endif %}
 
-<p>
+<p style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.75rem">
   <a href="/bots/deploy" class="btn btn-primary">+ Новый проект</a>
+  <span style="display:flex;flex-wrap:wrap;gap:.4rem" id="action-buttons">
+    <a id="action-edit" class="btn" href="#" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:.2rem"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Редактировать</a>
+    <a id="action-deploy" class="btn" href="#" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:.2rem"><polygon points="5 3 19 12 5 21 5 3"/></svg>Deploy</a>
+    <button class="btn" onclick="execGitPull()" id="action-gitpull" style="display:none" title="git pull на сервере"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:.2rem"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>Обновить репо</button>
+    <button class="btn" onclick="execCheckPerms()" id="action-perms" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:.2rem"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Права на файлы</button>
+    <button class="btn" onclick="execFixPerms()" id="action-fix-perms" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:.2rem"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Починить права</button>
+    <a id="action-db" class="btn" href="#" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:.2rem"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>Открыть БД</a>
+  </span>
 </p>
 
 {% if services %}
+<div style="display:flex;gap:1.5rem;align-items:flex-start">
+<div style="flex:1;min-width:0">
+
 <table class="table" id="services-table">
   <tr>
     <th>Проект</th>
@@ -19,7 +30,7 @@
     <th>Описание</th>
   </tr>
   {% for s in services %}
-  <tr class="db-row" data-id="{{ s.id }}" data-href="/bots/services/{{ s.id }}">
+  <tr class="db-row" data-id="{{ s.id }}" data-name="{{ s.project_name }}" data-path="{{ s.base_path or '' }}" data-server-name="{{ s.server_name or '' }}" data-db-type="{{ s.db_type or '' }}" data-db-name="{{ s.db_name or '' }}" data-description="{{ s.description or '' }}" data-entry-point="{{ s.entry_point or '' }}" data-systemd-user="{{ s.systemd_user or '' }}" data-port="{{ s.port or '' }}" data-git-branch="{{ s.git_branch or '' }}" data-repo-url="{{ s.repo_url or '' }}" data-status="{{ s.status }}" data-created="{{ s.created_at or '' }}" data-updated="{{ s.updated_at or '' }}" data-extra-env="{{ s.extra_env or '' }}">
     <td><b>{{ s.project_name }}</b></td>
     <td>{{ s.server_name or "—" }}</td>
     <td>{{ s.status }}</td>
@@ -27,15 +38,308 @@
   </tr>
   {% endfor %}
 </table>
+
+<div id="project-actions" style="margin-top:1rem;display:none">
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0" id="service-ctl-buttons">
+    <button class="btn btn-sm" onclick="execCtl('daemon-reload')">🔄 daemon-reload</button>
+    <button class="btn btn-sm" onclick="execCtl('enable-start')">▶ Включить + старт</button>
+    <button class="btn btn-sm btn-primary" onclick="execCtl('restart')">⟳ Перезапустить</button>
+    <button class="btn btn-sm" onclick="execCtl('stop')">⏹ Остановить</button>
+    <button class="btn btn-sm" onclick="execCtl('status')">ℹ Статус</button>
+    <button class="btn btn-sm" onclick="execCtl('logs')">📋 Логи</button>
+  </div>
+  <div id="path-info" class="card" style="margin-bottom:.75rem;cursor:pointer;user-select:all" onclick="copyPath()" title="Нажмите чтобы скопировать">
+    <div class="card-label">Путь к проекту</div>
+    <div id="path-text" style="font-family:monospace;font-size:.9rem;word-break:break-all"></div>
+  </div>
+  <div id="terminal-path" class="terminal-box" style="display:none">
+    <div class="terminal-header" data-no-close>
+      <span>Терминал</span>
+      <div style="display:flex;gap:.3rem">
+        <button class="term-copy" onclick="copyTerminal()" title="Копировать вывод"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <button class="term-copy" onclick="clearTerminal()" title="Очистить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16l9-9 8 8-3 3"/><path d="M6.5 13.5l8-8"/></svg></button>
+      </div>
+    </div>
+    <pre class="terminal-body" id="terminal-path-text" style="min-height:3rem;max-height:40vh;overflow-y:auto;user-select:text"><span id="terminal-lines"></span></pre>
+    <div style="display:flex;border-top:1px solid var(--border)">
+      <span style="background:#1e1e2e;color:#cdd6f4;padding:.4rem .6rem;font-family:monospace;font-size:.82rem;flex-shrink:0" id="terminal-prompt">$</span>
+      <input id="terminal-input" type="text" style="flex:1;border:none;padding:.4rem .6rem;font-family:monospace;font-size:.82rem;background:#1e1e2e;color:#cdd6f4;outline:none" placeholder="Введите команду..." autocomplete="off">
+    </div>
+  </div>
+  <div id="ctl-output" class="terminal-box" style="display:none">
+    <div class="terminal-header">Выполнение</div>
+    <pre class="terminal-body" id="ctl-output-text"></pre>
+    <div class="terminal-status" id="ctl-status"></div>
+  </div>
+  <div id="git-output" class="terminal-box" style="display:none">
+    <div class="terminal-header">Обновление репозитория</div>
+    <pre class="terminal-body" id="git-output-text"></pre>
+    <div class="terminal-status" id="git-status"></div>
+  </div>
+  <div id="perms-output" class="terminal-box" style="display:none">
+    <div class="terminal-header">Права доступа</div>
+    <pre class="terminal-body" id="perms-output-text"></pre>
+    <div class="terminal-status" id="perms-status"></div>
+  </div>
+</div>
+
+</div>
+
+  <table class="table" id="svc-config" style="max-width:600px;width:50%;display:none;margin-top:.25rem;flex-shrink:0">
+    <tr><th style="width:140px">Статус</th><td id="cfg-status"></td></tr>
+    <tr><th>Путь к проекту</th><td id="cfg-path" style="word-break:break-all;font-family:monospace;font-size:.8rem"></td></tr>
+    <tr><th>Точка входа</th><td id="cfg-entry-point"></td></tr>
+    <tr><th>Тип СУБД</th><td id="cfg-db-type"></td></tr>
+    <tr><th>База данных</th><td id="cfg-db-name" style="word-break:break-all"></td></tr>
+    <tr><th>Пользователь</th><td id="cfg-user"></td></tr>
+    <tr><th>Порт</th><td id="cfg-port"></td></tr>
+    <tr><th>Ветка</th><td id="cfg-branch"></td></tr>
+    <tr><th>Репозиторий</th><td id="cfg-repo"></td></tr>
+    <tr><th>Создан</th><td id="cfg-created"></td></tr>
+    <tr><th>Изменён</th><td id="cfg-updated"></td></tr>
+  </table>
+</div>
+
 {% else %}
 <p class="muted">Нет сохранённых проектов. <a href="/bots/deploy">Создать первый</a>.</p>
 {% endif %}
 
 <script>
-document.getElementById('services-table').addEventListener('dblclick', function(e) {
-  var row = e.target.closest('.db-row');
-  if (!row) return;
-  window.location.href = row.dataset.href;
+var selectedId = null;
+var selectedServer = '';
+var selectedPath = '';
+
+document.querySelectorAll('#services-table .db-row').forEach(function(row) {
+  row.addEventListener('click', function(e) {
+    document.querySelectorAll('#services-table .db-row').forEach(function(r) {
+      r.classList.remove('selected');
+    });
+    this.classList.add('selected');
+    selectedId = this.dataset.id;
+    selectedServer = this.dataset.serverName;
+    selectedPath = this.dataset.path;
+    var name = this.dataset.name;
+    var path = selectedPath;
+    document.getElementById('action-edit').href = '/bots/deploy?edit=' + selectedId;
+    document.getElementById('action-deploy').href = '/bots/services/' + selectedId + '/deploy';
+    document.getElementById('action-edit').style.display = '';
+    document.getElementById('action-deploy').style.display = '';
+    document.getElementById('action-gitpull').style.display = '';
+    document.getElementById('action-perms').style.display = '';
+    document.getElementById('action-fix-perms').style.display = '';
+    var dbType = this.dataset.dbType;
+    var dbName = this.dataset.dbName;
+    var dbBtn = document.getElementById('action-db');
+    if (dbType && dbName) {
+      dbBtn.style.display = '';
+      if (dbType === 'sqlite') {
+        dbBtn.href = '/sqlite/' + encodeURIComponent(selectedServer) + '/browse?path=' + encodeURIComponent(dbName);
+      } else {
+        dbBtn.href = '/pg-stub?server=' + encodeURIComponent(selectedServer) + '&db=' + encodeURIComponent(dbName);
+      }
+    } else {
+      dbBtn.style.display = 'none';
+    }
+    document.getElementById('project-actions').style.display = '';
+    document.getElementById('svc-config').style.display = '';
+    document.getElementById('cfg-status').textContent = this.dataset.status;
+    document.getElementById('cfg-path').textContent = path || '—';
+    document.getElementById('cfg-entry-point').textContent = this.dataset.entryPoint || '—';
+    document.getElementById('cfg-db-type').textContent = this.dataset.dbType || '—';
+    document.getElementById('cfg-db-name').textContent = this.dataset.dbName || '—';
+    document.getElementById('cfg-user').textContent = this.dataset.systemdUser || '—';
+    document.getElementById('cfg-port').textContent = this.dataset.port ? ':' + this.dataset.port : '—';
+    document.getElementById('cfg-branch').textContent = this.dataset.gitBranch;
+    var repo = this.dataset.repoUrl;
+    document.getElementById('cfg-repo').innerHTML = repo ? '<a href="' + repo + '" target="_blank">' + repo + '</a>' : '—';
+    document.getElementById('cfg-created').textContent = this.dataset.created || '—';
+    document.getElementById('cfg-updated').textContent = this.dataset.updated || '—';
+    if (path) {
+      document.getElementById('path-text').textContent = 'cd ' + path;
+      document.getElementById('terminal-path').style.display = '';
+      document.getElementById('terminal-prompt').textContent = selectedServer + '$';
+      document.getElementById('terminal-lines').textContent = 'ssh ' + selectedServer + '\n' + selectedServer + '$ cd ' + path;
+      document.getElementById('terminal-input').value = '';
+      document.getElementById('terminal-input').focus();
+    } else {
+      document.getElementById('path-text').textContent = 'Путь не указан';
+      document.getElementById('terminal-path').style.display = 'none';
+    }
+  });
+  row.addEventListener('dblclick', function(e) {
+    window.location.href = '/bots/deploy?edit=' + this.dataset.id;
+  });
 });
+
+document.getElementById('terminal-input').addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' || !this.value.trim() || !selectedId) return;
+  var cmd = this.value.trim();
+  var lines = document.getElementById('terminal-lines');
+  var input = this;
+  input.disabled = true;
+  lines.textContent += '\n' + selectedServer + '$ ' + cmd;
+  fetch('/api/exec', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({server: selectedServer, cwd: selectedPath, command: cmd})
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) {
+        lines.textContent += '\n' + data.error;
+      } else {
+        if (data.output) {
+          lines.textContent += '\n' + data.output.replace(/\n$/, '');
+        }
+        if (data.rc !== 0) {
+          lines.textContent += '\n' + '(exit ' + data.rc + ')';
+        }
+      }
+      lines.textContent += '\n' + selectedServer + '$ ';
+      input.value = '';
+      input.disabled = false;
+      input.focus();
+      var pre = document.getElementById('terminal-path-text');
+      pre.scrollTop = pre.scrollHeight;
+    })
+    .catch(function(e) {
+      lines.textContent += '\n' + 'Ошибка: ' + e.message + '\n' + selectedServer + '$ ';
+      input.disabled = false;
+    });
+});
+
+function copyPath() {
+  var text = document.getElementById('path-text').textContent;
+  if (!text) return;
+  navigator.clipboard.writeText(text);
+  var el = document.getElementById('path-text');
+  var orig = el.textContent;
+  el.textContent = '✓ Скопировано: ' + orig;
+  setTimeout(function() { el.textContent = orig; }, 1500);
+}
+
+function copyTerminal() {
+  var text = document.getElementById('terminal-lines').textContent;
+  if (!text) return;
+  navigator.clipboard.writeText(text);
+}
+
+function clearTerminal() {
+  var lines = document.getElementById('terminal-lines');
+  if (!selectedPath) { lines.textContent = ''; return; }
+  lines.textContent = 'ssh ' + selectedServer + '\n' + selectedServer + '$ cd ' + selectedPath;
+}
+
+function execCtl(action) {
+  if (!selectedId) return;
+  var outBox = document.getElementById('ctl-output');
+  var outText = document.getElementById('ctl-output-text');
+  var statusEl = document.getElementById('ctl-status');
+  outBox.style.display = '';
+  outText.textContent = '$ ' + action;
+  statusEl.className = 'terminal-status terminal-status-run';
+  statusEl.textContent = '⏳ ' + action + '...';
+  fetch('/bots/services/' + selectedId + '/deploy/ctl/' + action)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        statusEl.className = 'terminal-status terminal-status-ok';
+        statusEl.innerHTML = '✓ Готово' + (action === 'logs'
+          ? '<button class="term-copy" onclick="execCtl(\'logs\')" style="margin-left:auto" title="Обновить"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><polyline points="23 20 23 14 17 14"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg></button>'
+          : '');
+        outText.textContent += '\n' + (data.output || '');
+      } else {
+        statusEl.className = 'terminal-status terminal-status-fail';
+        statusEl.textContent = '✗ Ошибка';
+        outText.textContent += '\n' + (data.error || '');
+      }
+    });
+}
+
+function execGitPull() {
+  if (!selectedId) return;
+  var outBox = document.getElementById('git-output');
+  var outText = document.getElementById('git-output-text');
+  var statusEl = document.getElementById('git-status');
+  outBox.style.display = '';
+  outText.textContent = '$ git pull';
+  statusEl.className = 'terminal-status terminal-status-run';
+  statusEl.textContent = '⏳ Выполняется...';
+  fetch('/bots/services/' + selectedId + '/deploy/git-pull', {method:'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        statusEl.className = 'terminal-status terminal-status-ok';
+        statusEl.innerHTML = '✓ Готово <button class="term-copy" onclick="execCtl(\'restart\')" style="margin-left:auto" title="Перезапустить сервис">⟳ Перезапустить</button>';
+        outText.textContent += '\n' + (data.output || '');
+      } else {
+        statusEl.className = 'terminal-status terminal-status-fail';
+        statusEl.textContent = '✗ Ошибка';
+        outText.textContent += '\n' + (data.error || '');
+      }
+    });
+}
+function execCheckPerms() {
+  if (!selectedId) return;
+  var outBox = document.getElementById('perms-output');
+  if (!outBox) return;
+  var outText = document.getElementById('perms-output-text');
+  if (!outText) return;
+  var statusEl = document.getElementById('perms-status');
+  if (!statusEl) return;
+  outBox.style.display = '';
+  outText.textContent = '$ Проверка прав файлов';
+  statusEl.className = 'terminal-status terminal-status-run';
+  statusEl.textContent = '⏳ Проверка...';
+  fetch('/bots/services/' + selectedId + '/check-perms', {method:'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        statusEl.className = 'terminal-status terminal-status-ok';
+        statusEl.textContent = '✓ Готово';
+        outText.textContent += '\n' + (data.output || '');
+      } else {
+        statusEl.className = 'terminal-status terminal-status-fail';
+        statusEl.textContent = '✗ Ошибка';
+        outText.textContent += '\n' + (data.error || '');
+      }
+    })
+    .catch(function(e) {
+      statusEl.className = 'terminal-status terminal-status-fail';
+      statusEl.textContent = '✗ Ошибка';
+      outText.textContent += '\n' + 'Ошибка запроса: ' + e.message;
+    });
+}
+function execFixPerms() {
+  if (!selectedId) return;
+  var outBox = document.getElementById('perms-output');
+  if (!outBox) return;
+  var outText = document.getElementById('perms-output-text');
+  if (!outText) return;
+  var statusEl = document.getElementById('perms-status');
+  if (!statusEl) return;
+  outBox.style.display = '';
+  outText.textContent = '$ Исправление прав';
+  statusEl.className = 'terminal-status terminal-status-run';
+  statusEl.textContent = '⏳ Исправление...';
+  fetch('/bots/services/' + selectedId + '/fix-perms', {method:'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        statusEl.className = 'terminal-status terminal-status-ok';
+        statusEl.textContent = '✓ Готово';
+        outText.textContent += '\n' + (data.output || '');
+      } else {
+        statusEl.className = 'terminal-status terminal-status-fail';
+        statusEl.textContent = '✗ Ошибка';
+        outText.textContent += '\n' + (data.error || '');
+      }
+    })
+    .catch(function(e) {
+      statusEl.className = 'terminal-status terminal-status-fail';
+      statusEl.textContent = '✗ Ошибка';
+      outText.textContent += '\n' + 'Ошибка запроса: ' + e.message;
+    });
+}
 </script>
 {% endblock %}
