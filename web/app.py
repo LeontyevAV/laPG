@@ -181,6 +181,7 @@ async def dashboard(request: Request):
         "databases": dbs,
         "backups": backups,
         "disk": disk,
+        "servers": YAML_CFG.servers,
     })
 
 
@@ -231,12 +232,16 @@ async def api_databases():
     if not conn_ok:
         return '<div class="error">Нет подключения к PostgreSQL</div>'
     db_sizes = await get_db_sizes()
-    lines = "".join(
-        f'<tr><td>{n}</td><td>{_fmt_size(s)}</td>'
-        f'<td><button class="btn btn-sm" hx-post="/backup/{n}" '
-        f'hx-target="#result" hx-swap="innerHTML">Бэкап</button></td></tr>'
-        for n, s in db_sizes
-    )
+    lines = ""
+    for n, s in db_sizes:
+        lines += (
+            f'<tr><td>{n}</td><td>{_fmt_size(s)}</td>'
+            f'<td style="display:flex;gap:.3rem;flex-wrap:wrap">'
+            f'<button class="btn btn-sm" hx-post="/backup/{n}" '
+            f'hx-target="#result" hx-swap="innerHTML">Бэкап</button>'
+            f'<button class="btn btn-sm" data-action="open-update-modal" data-db="{n}">Обновить с сервера</button>'
+            f'</td></tr>'
+        )
     return f'<table class="table"><tr><th>БД</th><th>Размер</th><th></th></tr>{lines}</table>'
 
 
@@ -374,6 +379,157 @@ async def backup_all_route():
     output = buf.getvalue()
     status = "ok" if ok else "fail"
     return f'<div class="toast toast-{status}"><pre>{output}</pre></div>'
+
+
+@app.get("/api/remote-dbs/{server_name}", response_class=HTMLResponse)
+async def api_remote_dbs(server_name: str, local_db: str = ""):
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return '<div class="toast toast-fail">Сервер не найден</div>'
+    result = _ssh_run_cmd(server,
+        "sudo -u postgres psql -t -A -c \"SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres') ORDER BY datname\" 2>/dev/null"
+    )
+    if result is None:
+        return '<div class="toast toast-fail">SSH недоступен</div>'
+    stdout, stderr, rc = result
+    if rc != 0:
+        return f'<div class="toast toast-fail"><pre>{stderr or stdout}</pre></div>'
+    dbs = [line.strip() for line in stdout.strip().splitlines() if line.strip()]
+    if not dbs:
+        return '<div class="muted">Нет БД на сервере</div>'
+    has_match = local_db in dbs
+    if has_match:
+        options = f'<option value="{local_db}" selected>{local_db}</option>'
+        options += "".join(f'<option value="{d}">{d}</option>' for d in dbs if d != local_db)
+    else:
+        options = '<option value="" disabled selected>Выберите БД...</option>'
+        options += "".join(f'<option value="{d}">{d}</option>' for d in dbs)
+    return f'<select id="remote-db-select" class="select">{options}</select>'
+
+
+@app.post("/update-from-server", response_class=HTMLResponse)
+async def update_from_server(
+    local_db: str = Form(...),
+    server_name: str = Form(...),
+    remote_db: str = Form(...),
+):
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return '<div class="toast toast-fail">Сервер не найден</div>'
+
+    buf = io.StringIO()
+    env = os.environ.copy()
+    if DB_SUPERUSER_PASSWORD:
+        env["PGPASSWORD"] = DB_SUPERUSER_PASSWORD
+
+    def log(msg):
+        print(msg, file=buf, flush=True)
+
+    def run_in_executor(func, *args, **kwargs):
+        return asyncio.get_event_loop().run_in_executor(None, lambda: func(*args, **kwargs))
+
+    log(f"=== Обновление {local_db} из {server_name}:{remote_db} ===")
+
+    log("\n[1/5] Бэкап локальной БД...")
+    cfg = get_db_backup_config(local_db, YAML_CFG)
+    ok, output = await run_in_executor(_capture_output, do_backup, local_db, cfg.compress, cfg.keep)
+    log(output)
+    if not ok:
+        log("ОШИБКА: бэкап не удался, обновление отменено.")
+        return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+
+    log("\n[2/5] Дамп с удалённого сервера...")
+    remote_dump = f"/tmp/_lapg_sync_{remote_db}.dump"
+    cmd = (
+        f"sudo -u postgres pg_dump -F c -f {remote_dump} {remote_db} 2>&1 && echo 'DUMP_OK' || echo 'DUMP_FAIL'"
+    )
+    result = await run_in_executor(_ssh_run_cmd, server, cmd)
+    if result is None:
+        log("ОШИБКА: SSH недоступен.")
+        return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+    stdout, stderr, rc = result
+    log((stdout + stderr).strip())
+    if "DUMP_FAIL" in stdout or rc != 0:
+        log("ОШИБКА: pg_dump на сервере не удался.")
+        return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+
+    log("\n[3/5] Скачивание дампа...")
+    scp_base = [
+        "scp", "-O",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-P", str(server.port),
+    ]
+    if server.name in _ssh_sessions and _has_sshpass():
+        scp_cmd = ["sshpass", "-p", _ssh_sessions[server.name]] + scp_base
+    else:
+        scp_cmd = scp_base
+    scp_cmd.extend([f"{server.user}@{server.host}:{remote_dump}", remote_dump])
+    try:
+        r = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            log(f"ОШИБКА SCP: {r.stderr}")
+            cleanup_cmd = f"rm -f {remote_dump}"
+            await run_in_executor(_ssh_run_cmd, server, cleanup_cmd)
+            return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        log(f"ОШИБКА SCP: {e}")
+        cleanup_cmd = f"rm -f {remote_dump}"
+        await run_in_executor(_ssh_run_cmd, server, cleanup_cmd)
+        return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+    log("Дамп скачан.")
+
+    log("\n[4/5] Восстановление локальной БД...")
+    try:
+        check = f"SELECT 1 FROM pg_database WHERE datname = '{local_db}'"
+        result = subprocess_run_psql("psql", check)
+        exists = "1" in result.stdout
+    except Exception:
+        exists = False
+
+    if exists:
+        log(f"Удаление {local_db}...")
+        try:
+            subprocess_run_psql("dropdb", local_db)
+        except Exception as e:
+            log(f"Ошибка удаления: {e}")
+            return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+
+    log(f"Создание {local_db}...")
+    try:
+        subprocess_run_psql("createdb", local_db)
+    except Exception as e:
+        log(f"Ошибка создания: {e}")
+        return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+
+    try:
+        cmd = [
+            "pg_restore",
+            "-h", DB_HOST,
+            "-U", DB_SUPERUSER,
+            "-d", local_db,
+            remote_dump,
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=300)
+        if r.stderr:
+            log(r.stderr.strip())
+        if r.returncode != 0:
+            log(f"Предупреждения pg_restore (rc={r.returncode}), но БД восстановлена.")
+        else:
+            log("Восстановление завершено успешно.")
+    except Exception as e:
+        log(f"Ошибка pg_restore: {e}")
+        return f'<div class="toast toast-fail"><pre>{buf.getvalue()}</pre></div>'
+
+    log("\n[5/5] Очистка...")
+    cleanup_cmd = f"rm -f {remote_dump}"
+    await run_in_executor(_ssh_run_cmd, server, cleanup_cmd)
+    try:
+        os.remove(remote_dump)
+    except OSError:
+        pass
+
+    log("\n=== Готово ===")
+    return f'<div class="toast toast-ok"><pre>{buf.getvalue()}</pre></div>'
 
 
 @app.get("/restore", response_class=HTMLResponse)

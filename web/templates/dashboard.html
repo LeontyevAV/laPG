@@ -44,4 +44,136 @@
 </section>
 
 <div id="result"></div>
+
+<div id="update-modal" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.5);align-items:center;justify-content:center" onclick="if(event.target===this)closeUpdateModal()">
+  <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1.5rem;min-width:400px;max-width:500px" onclick="event.stopPropagation()">
+    <h3 style="margin-top:0">Обновить БД из сервера</h3>
+    <div id="modal-form">
+      <div style="margin-bottom:.75rem">
+        <div class="card-label" style="margin-bottom:.3rem">Локальная БД</div>
+        <div id="modal-local-db" style="font-family:monospace;font-weight:bold"></div>
+      </div>
+      <div style="margin-bottom:.75rem">
+        <div class="card-label" style="margin-bottom:.3rem">Сервер</div>
+        <select id="modal-server-select" class="select" style="width:100%" onchange="onModalServerChange()">
+          {% for s in servers %}
+          <option value="{{ s.name }}">{{ s.name }} ({{ s.host }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="margin-bottom:1rem">
+        <div class="card-label" style="margin-bottom:.3rem">БД на сервере</div>
+        <div id="modal-remote-dbs"><span class="muted">Выберите сервер...</span></div>
+        <div id="modal-remote-dbs-error" style="display:none;color:#ef4444;font-size:.8rem;margin-top:.3rem">Выберите БД</div>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end">
+        <button class="btn" onclick="closeUpdateModal()">Отмена</button>
+        <button class="btn btn-primary" id="modal-update-btn" onclick="doUpdateFromServer()">Обновить</button>
+      </div>
+    </div>
+    <div id="modal-progress" style="display:none">
+      <div id="modal-step" style="margin-bottom:.75rem;font-weight:bold"></div>
+      <div id="modal-log" style="max-height:300px;overflow-y:auto;font-family:monospace;font-size:.8rem;padding:.75rem;background:var(--bg-alt,#0d1117);border:1px solid var(--border);border-radius:6px;white-space:pre-wrap;word-break:break-all"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.75rem">
+        <button class="btn btn-primary" id="modal-close-btn" style="display:none" onclick="closeUpdateModal()">Закрыть</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-action="open-update-modal"]');
+  if (btn) {
+    e.preventDefault();
+    openUpdateModal(btn.dataset.db);
+  }
+});
+document.addEventListener('change', function(e) {
+  if (e.target.id === 'remote-db-select') {
+    var err = document.getElementById('modal-remote-dbs-error');
+    if (err) err.style.display = 'none';
+  }
+});
+
+function openUpdateModal(dbName) {
+  document.getElementById('modal-local-db').textContent = dbName;
+  document.getElementById('modal-local-db').dataset.db = dbName;
+  document.getElementById('modal-server-select').selectedIndex = 0;
+  document.getElementById('modal-remote-dbs').innerHTML = '<span class="muted">Выберите сервер...</span>';
+  document.getElementById('modal-remote-dbs-error').style.display = 'none';
+  document.getElementById('modal-form').style.display = '';
+  document.getElementById('modal-progress').style.display = 'none';
+  document.getElementById('modal-log').innerHTML = '';
+  document.getElementById('modal-step').textContent = '';
+  document.getElementById('modal-close-btn').style.display = 'none';
+  document.getElementById('update-modal').style.display = 'flex';
+  onModalServerChange();
+}
+function closeUpdateModal() {
+  document.getElementById('update-modal').style.display = 'none';
+}
+function onModalServerChange() {
+  var server = document.getElementById('modal-server-select').value;
+  var localDb = document.getElementById('modal-local-db').dataset.db;
+  var dbsContainer = document.getElementById('modal-remote-dbs');
+  document.getElementById('modal-remote-dbs-error').style.display = 'none';
+  if (!server) {
+    dbsContainer.innerHTML = '<span class="muted">Выберите сервер...</span>';
+    return;
+  }
+  dbsContainer.innerHTML = '<span class="muted">Загрузка...</span>';
+  fetch('/api/remote-dbs/' + server + '?local_db=' + encodeURIComponent(localDb))
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      dbsContainer.innerHTML = html;
+    })
+    .catch(function() {
+      dbsContainer.innerHTML = '<span class="muted">Ошибка загрузки</span>';
+    });
+}
+function doUpdateFromServer() {
+  var localDb = document.getElementById('modal-local-db').dataset.db;
+  var server = document.getElementById('modal-server-select').value;
+  var select = document.getElementById('remote-db-select');
+  var err = document.getElementById('modal-remote-dbs-error');
+  if (!select || !select.value) {
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  var remoteDbName = select.value;
+
+  document.getElementById('modal-form').style.display = 'none';
+  document.getElementById('modal-progress').style.display = '';
+  document.getElementById('modal-log').innerHTML = 'Выполняется обновление... Это может занять несколько минут.';
+  document.getElementById('modal-step').textContent = 'Подготовка...';
+  document.getElementById('modal-close-btn').style.display = 'none';
+
+  var formData = new FormData();
+  formData.append('local_db', localDb);
+  formData.append('server_name', server);
+  formData.append('remote_db', remoteDbName);
+
+  fetch('/update-from-server', {method: 'POST', body: formData})
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      document.getElementById('modal-log').innerHTML = html;
+      if (html.indexOf('toast-ok') !== -1) {
+        document.getElementById('modal-step').textContent = 'Готово!';
+        document.getElementById('modal-step').style.color = '#22c55e';
+        document.getElementById('modal-log').style.borderColor = '#22c55e';
+      } else {
+        document.getElementById('modal-step').textContent = 'Ошибка!';
+        document.getElementById('modal-log').style.borderColor = '#ef4444';
+      }
+      document.getElementById('modal-close-btn').style.display = '';
+    })
+    .catch(function() {
+      document.getElementById('modal-log').innerHTML = '<div class="toast toast-fail">Ошибка соединения</div>';
+      document.getElementById('modal-step').textContent = 'Ошибка!';
+      document.getElementById('modal-close-btn').style.display = '';
+    });
+}
+</script>
 {% endblock %}
