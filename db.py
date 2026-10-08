@@ -53,6 +53,68 @@ def init_db():
         conn.execute("ALTER TABLE _services ADD COLUMN db_name TEXT")
     conn.commit()
     conn.close()
+    _init_audit_log(_get_conn())
+
+
+def _init_audit_log(conn):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS _audit_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            action      TEXT NOT NULL,
+            server      TEXT,
+            service     TEXT,
+            details     TEXT,
+            status      TEXT DEFAULT 'ok',
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
+
+def audit_log(action: str, server: str = "", service: str = "", details: str = "", status: str = "ok"):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO _audit_log (action, server, service, details, status) VALUES (?, ?, ?, ?, ?)",
+        (action, server, service, details, status),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_audit_logs(action: str = "", server: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+    conn = _get_conn()
+    where = []
+    params = []
+    if action:
+        where.append("action = ?")
+        params.append(action)
+    if server:
+        where.append("server = ?")
+        params.append(server)
+    clause = " WHERE " + " AND ".join(where) if where else ""
+    params.extend([limit, offset])
+    rows = conn.execute(
+        f"SELECT * FROM _audit_log{clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_audit_logs(action: str = "", server: str = "") -> int:
+    conn = _get_conn()
+    where = []
+    params = []
+    if action:
+        where.append("action = ?")
+        params.append(action)
+    if server:
+        where.append("server = ?")
+        params.append(server)
+    clause = " WHERE " + " AND ".join(where) if where else ""
+    row = conn.execute(f"SELECT COUNT(*) as cnt FROM _audit_log{clause}", params).fetchone()
+    conn.close()
+    return row["cnt"]
 
 
 def migrate_favorites(favorites: dict[str, list[str]]):

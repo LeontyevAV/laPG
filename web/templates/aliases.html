@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Aliases: {{ server.name }}</h1>
+<p class="muted">{{ server.user }}@{{ server.host }}:{{ server.port }} — <code>/root/.bashrc</code></p>
+
+{% if error %}
+<div class="toast toast-fail">{{ error }}</div>
+{% endif %}
+
+{% if aliases %}
+<section>
+  <div class="section-header"><h2>Алиасы ({{ aliases|length }})</h2></div>
+  <table class="table" style="max-width:100%">
+    <thead>
+      <tr><th>Alias</th><th>Команда</th><th>Файл</th></tr>
+    </thead>
+    <tbody>
+      {% for a in aliases %}
+      <tr>
+        <td style="font-family:monospace;font-weight:600;white-space:nowrap">{{ a.name }}</td>
+        <td style="font-family:monospace;font-size:.82rem;user-select:text">{{ a.cmd }}</td>
+        <td class="muted" style="white-space:nowrap">{{ a.file }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<p class="muted">Алиасы не найдены в rc-файлах.</p>
+{% endif %}
+
+{% for f in files %}
+<div class="terminal-box" style="margin-top:1.5rem">
+  <div class="terminal-header">{{ f.path }}</div>
+  <pre class="terminal-body term-scroll">{{ f.content }}</pre>
+</div>
+{% endfor %}
+
+<p style="margin-top:2rem"><a href="/servers" class="btn">← К серверам</a></p>
+{% endblock %}

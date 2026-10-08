@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import os
+import re
 import shutil
 import shlex
 import subprocess
@@ -11,16 +12,18 @@ import contextlib
 from datetime import datetime
 from pathlib import Path
 
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+
 import asyncpg
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, Request, Form, UploadFile, File
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from settings import get_settings, get_db_backup_config
-from db import init_db as init_services_db, migrate_favorites, create_service, update_service, list_services, get_service
+from db import init_db as init_services_db, migrate_favorites, create_service, update_service, list_services, get_service, audit_log, list_audit_logs, count_audit_logs
 
 
 @asynccontextmanager
@@ -196,6 +199,61 @@ async def tools_page(request: Request):
     })
 
 
+DEPLOY_SH = PROJECT_DIR / "deploy.sh"
+
+
+@app.post("/api/self-update")
+async def self_update():
+    import html as _html
+    import tempfile
+    if not DEPLOY_SH.exists():
+        return '<div class="toast toast-fail">deploy.sh не найден</div>'
+    try:
+        log_path = PROJECT_DIR / "tmp" / "self-update.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w") as f:
+            f.write(f"=== laPG deploy {datetime.now().isoformat()} ===\n")
+        with open(log_path, "a") as f:
+            proc = subprocess.Popen(
+                ["bash", str(DEPLOY_SH)],
+                stdout=f, stderr=subprocess.STDOUT,
+                cwd=str(PROJECT_DIR),
+                start_new_session=True,
+            )
+        audit_log(action="self-update", status="started", details="deploy.sh запущен")
+        return '<div class="toast"><pre>Обновление запущено. Результат будет в секции статуса ниже. Лог: tmp/self-update.log</pre></div>'
+    except Exception as e:
+        audit_log(action="self-update", status="error", details=str(e)[:500])
+        return f'<div class="toast toast-fail">{_html.escape(str(e))}</div>'
+
+
+@app.get("/api/self-update/status")
+async def self_update_status():
+    try:
+        r = subprocess.run(
+            ["systemctl", "--user", "is-active", "lapg"],
+            capture_output=True, text=True, timeout=5,
+        )
+        active = r.stdout.strip() == "active"
+        r2 = subprocess.run(
+            ["systemctl", "--user", "show", "lapg", "--property=ActiveEnterTimestamp"],
+            capture_output=True, text=True, timeout=5,
+        )
+        started = r2.stdout.strip().replace("ActiveEnterTimestamp=", "")
+    except Exception:
+        active = False
+        started = ""
+    try:
+        r3 = subprocess.run(
+            ["git", "-C", str(PROJECT_DIR), "log", "-1", "--format=%h %s"],
+            capture_output=True, text=True, timeout=5,
+        )
+        version = r3.stdout.strip()
+    except Exception:
+        version = ""
+    return {"active": active, "started": started, "version": version}
+
+
 @app.get("/tools/{name}/status")
 async def tools_status(name: str):
     server = next((s for s in YAML_CFG.servers if s.name == name), None)
@@ -366,6 +424,7 @@ async def backup_single(db_name: str):
         None, _capture_output, do_backup, db_name, cfg.compress, cfg.keep
     )
     status = "ok" if ok else "fail"
+    audit_log(action="backup", service=db_name, details=output[:500] if output else "", status=status)
     return f'<div class="toast toast-{status}"><pre>{output}</pre></div>'
 
 
@@ -378,6 +437,7 @@ async def backup_all_route():
         ok = await _backup_all()
     output = buf.getvalue()
     status = "ok" if ok else "fail"
+    audit_log(action="backup-all", details=output[:500] if output else "", status=status)
     return f'<div class="toast toast-{status}"><pre>{output}</pre></div>'
 
 
@@ -529,6 +589,13 @@ async def update_from_server(
         pass
 
     log("\n=== Готово ===")
+    audit_log(
+        action="update-from-server",
+        server=server_name,
+        service=local_db,
+        details=f"remote_db={remote_db}",
+        status="ok",
+    )
     return f'<div class="toast toast-ok"><pre>{buf.getvalue()}</pre></div>'
 
 
@@ -1226,6 +1293,52 @@ done
     return templates.TemplateResponse(request, "users.html", {"server": server, "users": users})
 
 
+@app.get("/servers/{name}/aliases", response_class=HTMLResponse)
+async def server_aliases(request: Request, name: str):
+    server = next((s for s in YAML_CFG.servers if s.name == name), None)
+    if not server:
+        return HTMLResponse("Сервер не найден", status_code=404)
+
+    rc_files = ["/root/.bashrc", "/root/.bash_aliases", "/root/.bash_profile"]
+    cat_cmd = "; ".join(
+        f'echo "###FILE:{f}"; cat {f} 2>/dev/null' for f in rc_files
+    )
+    result = _ssh_run_cmd(server, cat_cmd)
+    if result is None:
+        return templates.TemplateResponse(request, "aliases.html", {
+            "server": server, "aliases": [], "files": [], "error": "SSH недоступен",
+        })
+
+    out = result[0] or ""
+    files = []
+    aliases = []
+    cur_file = ""
+    buf = []
+    for line in out.splitlines():
+        if line.startswith("###FILE:"):
+            if cur_file:
+                files.append({"path": cur_file, "content": "\n".join(buf)})
+            cur_file = line[len("###FILE:"):].strip()
+            buf = []
+        else:
+            buf.append(line)
+    if cur_file:
+        files.append({"path": cur_file, "content": "\n".join(buf)})
+
+    for f in files:
+        for line in f["content"].splitlines():
+            m = re.match(r"\s*alias\s+([A-Za-z0-9_.\-]+)=(.*)$", line)
+            if m:
+                cmd = m.group(2).strip()
+                if len(cmd) >= 2 and cmd[0] in "'\"" and cmd[-1] == cmd[0]:
+                    cmd = cmd[1:-1]
+                aliases.append({"name": m.group(1), "cmd": cmd, "file": f["path"]})
+
+    return templates.TemplateResponse(request, "aliases.html", {
+        "server": server, "aliases": aliases, "files": [f for f in files if f["content"].strip()], "error": "",
+    })
+
+
 @app.post("/servers/{name}/users/{username}/toggle-lock", response_class=HTMLResponse)
 async def user_toggle_lock(name: str, username: str):
     server = next((s for s in YAML_CFG.servers if s.name == name), None)
@@ -1477,6 +1590,13 @@ async def fix_perms(service_id: int):
     stdout, stderr, rc = result
     output = (stdout + stderr).strip()
     if rc == 0:
+        audit_log(
+            action="fix-perms",
+            server=s.get("server_name", ""),
+            service=s.get("project_name", ""),
+            details=f"user={user}",
+            status="ok",
+        )
         return {"ok": True, "output": f"Права исправлены для пользователя {user}:\n{output}"}
     return {"ok": False, "error": output or f"Ошибка (rc={rc})"}
 
@@ -1631,8 +1751,17 @@ async def pyver_switch(service_id: int, body: dict = None):
 
     stdout, stderr, rc = result
     output = (stdout + stderr).strip()
+    action_name = "git-pull" if pull else "git-clone"
+    status = "ok" if rc == 0 else "error"
+    audit_log(
+        action=action_name,
+        server=s.get("server_name", ""),
+        service=s.get("project_name", ""),
+        details=output[:500] if output else "",
+        status=status,
+    )
     if rc == 0:
-        return {"ok": True, "output": output or f"Готово: переключено на {version}"}
+        return {"ok": True, "output": output or "Готово"}
     else:
         return {"ok": False, "error": output or f"Ошибка (rc={rc})"}
 
@@ -1896,6 +2025,15 @@ async def service_ctl(service_id: int, action: str):
 
     if action == "status" and "active (running)" in output:
         update_service(service_id, status="deployed")
+
+    if action in ("daemon-reload", "enable-start", "restart", "stop"):
+        audit_log(
+            action=f"service:{action}",
+            server=s.get("server_name", ""),
+            service=s.get("project_name", ""),
+            details=output[:500] if output else "",
+            status="ok" if ok else "error",
+        )
 
     return {"ok": ok, "output": output or ("" if ok else f"Ошибка (rc={rc})")}
 
@@ -2297,6 +2435,379 @@ async def bots_logs(name: str, service_name: str):
   </div>
   <pre class="modal-pre" id="log-text">{escaped}</pre>
 </div>'''
+
+
+_PRIO_NAMES = {"emerg": 0, "alert": 1, "crit": 2, "err": 3, "warning": 4, "notice": 5, "info": 6, "debug": 7}
+
+_TEXT_PATTERNS = {
+    0: r"\[emerg(?:ency)?\]|(?:^|\s)emerg(?:ency)?\s*:",
+    1: r"\[alert\]|(?:^|\s)alert\s*:",
+    2: r"\[crit(?:ical)?\]|(?:^|\s)crit(?:ical)?\s*:",
+    3: r"\[err(?:or)?\]|(?:^|\s)error\s*:|-\s*error\s*-",
+    4: r"\[warn(?:ing)?\]|(?:^|\s)warn(?:ing)?\s*:|-\s*warn(?:ing)?\s*-",
+    5: r"\[notice\]|(?:^|\s)notice\s*:",
+    6: r"\[info\]|(?:^|\s)info\s*:|-\s*info\s*-",
+    7: r"\[debug\]|(?:^|\s)debug\s*:|-\s*debug\s*-",
+}
+
+
+def _level_prio(level: str) -> set:
+    return {_PRIO_NAMES[n.strip()] for n in level.split(",") if n.strip() in _PRIO_NAMES} if level else set()
+
+
+def _level_text_match(msg: str, prio: set) -> bool:
+    """Match a selected level present in the message text ([ERROR], ERROR:, - ERROR - ...)."""
+    for p in prio:
+        pat = _TEXT_PATTERNS.get(p)
+        if pat and re.search(pat, msg or "", re.IGNORECASE):
+            return True
+    return False
+
+
+def _fmt_shortiso(obj: dict) -> str:
+    try:
+        ts = int(obj.get("__REALTIME_TIMESTAMP", 0))
+        ts_s = datetime.fromtimestamp(ts / 1_000_000).astimezone().isoformat(timespec="seconds")
+    except Exception:
+        ts_s = ""
+    host = obj.get("_HOSTNAME", "")
+    ident = obj.get("SYSLOG_IDENTIFIER", obj.get("_COMM", ""))
+    pid = obj.get("_PID", "")
+    msg = (obj.get("MESSAGE") or "").replace("\n", " ")
+    head = f"{ts_s} {host} {ident}"
+    return f"{head}[{pid}]: {msg}" if pid else f"{head}: {msg}"
+
+
+def _scan_journal(text: str, prio: set, limit: int, fetch_n: int) -> str:
+    """Parse journalctl -o json output, filter by priority set, return short-iso text."""
+    out_lines = []
+    for line in text.splitlines():
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        p = obj.get("PRIORITY", "")
+        try:
+            p = int(p)
+        except (TypeError, ValueError):
+            p = None
+        if prio:
+            if p not in prio and not _level_text_match(obj.get("MESSAGE", ""), prio):
+                continue
+        out_lines.append(_fmt_shortiso(obj))
+        if len(out_lines) >= limit:
+            break
+    return "\n".join(out_lines) or "-- No entries --"
+
+
+@app.get("/api/journal", response_class=HTMLResponse)
+async def api_journal(
+    server_name: str = "",
+    service: str = "",
+    lines: int = 100,
+    level: str = "",
+    since: str = "",
+):
+    if not server_name:
+        return '<div class="muted">Выберите сервер</div>'
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return '<div class="toast toast-fail">Сервер не найден</div>'
+    cmd = "journalctl -o json --no-pager"
+    if service:
+        cmd += f" -u '{service}'"
+    if since:
+        cmd += f" --since '{since}'"
+    prio = _level_prio(level)
+    fetch_n = min(lines * 10 if prio else lines, 20000)
+    cmd += f" -n {fetch_n}"
+    result = _ssh_run_cmd(server, cmd)
+    if result is None:
+        return '<div class="toast toast-fail">SSH недоступен</div>'
+    out, _, rc = result
+    import html as _html
+    text = _scan_journal(out, prio, lines, fetch_n)
+    return f'<pre class="terminal-body log-output term-scroll" id="log-content">{_html.escape(text)}</pre>'
+
+
+@app.get("/api/journal/stream")
+async def api_journal_stream(
+    server_name: str = "",
+    service: str = "",
+    level: str = "",
+):
+    if not server_name:
+        return Response("server_name required", status_code=400)
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return Response("server not found", status_code=404)
+
+    prio = _level_prio(level)
+    cmd_parts = ["journalctl", "-o", "json", "-f", "--no-pager"]
+    if service:
+        cmd_parts += ["-u", service]
+
+    ssh_cmd = [
+        "ssh", "-o", "StrictHostKeyChecking=accept-new",
+        "-p", str(server.port),
+        f"{server.user}@{server.host}",
+        " ".join(cmd_parts)
+    ]
+    if server.name in _ssh_sessions and _has_sshpass():
+        ssh_cmd = ["sshpass", "-p", _ssh_sessions[server.name]] + ssh_cmd
+
+    async def stream():
+        proc = await asyncio.create_subprocess_exec(
+            *ssh_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            while True:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=30)
+                if not line:
+                    break
+                try:
+                    obj = json.loads(line.decode("utf-8", errors="replace"))
+                except Exception:
+                    continue
+                p = obj.get("PRIORITY", "")
+                try:
+                    p = int(p)
+                except (TypeError, ValueError):
+                    p = None
+                if prio and p not in prio and not _level_text_match(obj.get("MESSAGE", ""), prio):
+                    continue
+                yield f"data: {_fmt_shortiso(obj)}\n\n"
+        except asyncio.TimeoutError:
+            pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@app.get("/api/journal/local/stream")
+async def api_journal_local_stream(level: str = ""):
+    prio = _level_prio(level)
+    cmd_parts = ["journalctl", "--user", "-u", "lapg", "-o", "json", "-f", "--no-pager"]
+
+    async def stream():
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_parts,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            while True:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=30)
+                if not line:
+                    break
+                try:
+                    obj = json.loads(line.decode("utf-8", errors="replace"))
+                except Exception:
+                    continue
+                p = obj.get("PRIORITY", "")
+                try:
+                    p = int(p)
+                except (TypeError, ValueError):
+                    p = None
+                if prio and p not in prio and not _level_text_match(obj.get("MESSAGE", ""), prio):
+                    continue
+                yield f"data: {_fmt_shortiso(obj)}\n\n"
+        except asyncio.TimeoutError:
+            pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+CRON_LOG = PROJECT_DIR / "backup" / "cron.log"
+
+
+@app.get("/api/cron-log", response_class=HTMLResponse)
+async def api_cron_log(lines: int = 200):
+    import html as _html
+    if not os.path.exists(CRON_LOG):
+        return '<pre class="terminal-body">Файл cron.log не найден</pre>'
+    try:
+        with open(CRON_LOG, "r") as f:
+            all_lines = f.readlines()
+        tail = all_lines[-min(lines, len(all_lines)):]
+        text = "".join(tail)
+    except Exception as e:
+        return f'<pre class="terminal-body">Ошибка чтения: {_html.escape(str(e))}</pre>'
+    return f'<pre class="terminal-body log-output term-scroll" id="log-content">{_html.escape(text or "(пусто)")}</pre>'
+
+
+@app.get("/api/journal/local", response_class=HTMLResponse)
+async def api_journal_local(lines: int = 200, level: str = ""):
+    import html as _html
+    prio = _level_prio(level)
+    fetch_n = min(lines * 10 if prio else lines, 20000)
+    cmd = ["journalctl", "--user", "-u", "lapg", "--no-pager", "-o", "json"]
+    cmd += ["-n", str(fetch_n)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        text = _scan_journal(r.stdout, prio, lines, fetch_n)
+    except Exception as e:
+        return f'<pre class="terminal-body">{_html.escape(str(e))}</pre>'
+    return f'<pre class="terminal-body log-output term-scroll" id="log-content">{_html.escape(text)}</pre>'
+
+
+SELF_UPDATE_LOG = PROJECT_DIR / "tmp" / "self-update.log"
+
+
+@app.get("/api/self-update-log", response_class=HTMLResponse)
+async def api_self_update_log():
+    import html as _html
+    if not SELF_UPDATE_LOG.exists():
+        return '<pre class="terminal-body">Файл tmp/self-update.log не найден</pre>'
+    try:
+        text = SELF_UPDATE_LOG.read_text()
+    except Exception as e:
+        return f'<pre class="terminal-body">{_html.escape(str(e))}</pre>'
+    return f'<pre class="terminal-body log-output term-scroll" id="log-content">{_html.escape(text or "(пусто)")}</pre>'
+
+
+@app.get("/api/log-services/{server_name}")
+async def api_log_services(server_name: str):
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return []
+    result = _ssh_run_cmd(server,
+        "systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null | awk '{print $1}' | sed 's/\\.service$//'")
+    if result is None:
+        return []
+    out, _, rc = result
+    if rc != 0:
+        return []
+    services = sorted(s.strip() for s in out.strip().splitlines() if s.strip())
+    ours = {
+        str(s.get("project_name", "")).removesuffix(".service")
+        for s in list_services()
+        if s.get("server_name") == server_name and s.get("project_name")
+    }
+    ours |= {str(n).removesuffix(".service") for n in YAML_CFG.bots.favorites.get(server_name, [])}
+    return sorted(services, key=lambda x: (x not in ours, x))
+
+
+@app.get("/api/log-files/{server_name}")
+async def api_log_files(server_name: str):
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return []
+    cmd = ("find /root /home /srv /opt /var/log -maxdepth 4 -type f -name '*.log' "
+           "2>/dev/null | grep -v '/.npm/\\|/.pm2/\\|/node_modules/\\|/.cache/\\|/.local/' "
+           "| sort | head -n 400")
+    result = _ssh_run_cmd(server, cmd)
+    if result is None:
+        return []
+    out, _, rc = result
+    if rc != 0:
+        return []
+    return [p.strip() for p in out.strip().splitlines() if p.strip()]
+
+
+@app.get("/api/ssh-file", response_class=HTMLResponse)
+async def api_ssh_file(
+    server_name: str = "",
+    path: str = "",
+    lines: int = 200,
+):
+    import html as _html
+    if not server_name or not path:
+        return '<pre class="terminal-body">Не указан файл</pre>'
+    if path.startswith("-") or "\n" in path:
+        return '<pre class="terminal-body">Некорректный путь</pre>'
+    server = next((s for s in YAML_CFG.servers if s.name == server_name), None)
+    if not server:
+        return '<pre class="terminal-body">Сервер не найден</pre>'
+    lines = max(10, min(lines, 5000))
+    result = _ssh_run_cmd(server, f"tail -n {lines} -- '{path}'")
+    if result is None:
+        return '<pre class="terminal-body">SSH недоступен</pre>'
+    out, _, rc = result
+    if rc != 0:
+        return f'<pre class="terminal-body">{_html.escape(out or "Файл не прочитан")}</pre>'
+    return f'<pre class="terminal-body log-output term-scroll" id="log-content">{_html.escape(out or "(пусто)")}</pre>'
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def sources_page(request: Request):
+    return templates.TemplateResponse(request, "sources.html", {
+        "servers": YAML_CFG.servers,
+    })
+
+
+@app.get("/logs", response_class=HTMLResponse)
+async def logs_page(request: Request):
+    return templates.TemplateResponse(request, "logs.html", {
+        "servers": YAML_CFG.servers,
+    })
+
+
+@app.get("/api/audit-log", response_class=HTMLResponse)
+async def api_audit_log(
+    action: str = "",
+    server: str = "",
+    page: int = 1,
+):
+    per_page = 50
+    offset = (page - 1) * per_page
+    logs = list_audit_logs(action=action, server=server, limit=per_page, offset=offset)
+    total = count_audit_logs(action=action, server=server)
+    import html as _html
+    if not logs:
+        return '<div class="muted">Нет записей</div>'
+    rows = ""
+    for log_entry in logs:
+        ts = log_entry.get("created_at", "")
+        act = log_entry.get("action", "")
+        srv = log_entry.get("server", "")
+        svc = log_entry.get("service", "")
+        det = log_entry.get("details", "")
+        st = log_entry.get("status", "")
+        badge = "badge-green" if st == "ok" else "badge-red"
+        rows += f"""<tr>
+          <td style="white-space:nowrap">{_html.escape(ts)}</td>
+          <td><span class="badge {badge}">{_html.escape(st)}</span></td>
+          <td style="font-weight:600">{_html.escape(act)}</td>
+          <td>{_html.escape(srv)}</td>
+          <td>{_html.escape(svc)}</td>
+          <td style="font-size:.8rem;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{_html.escape(det)}">{_html.escape(det[:100])}</td>
+        </tr>"""
+    pages = max(1, (total + per_page - 1) // per_page)
+    pag = ""
+    if pages > 1:
+        for p in range(1, pages + 1):
+            cls = "btn btn-sm btn-primary" if p == page else "btn btn-sm"
+            pag += f'<button class="{cls}" onclick="loadAuditPage({p})">{p}</button> '
+    return f"""<table class="table" style="width:100%">
+  <thead><tr>
+    <th>Время</th><th>Статус</th><th>Действие</th><th>Сервер</th><th>Сервис</th><th>Детали</th>
+  </tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+<div style="display:flex;gap:.3rem;margin-top:.5rem;flex-wrap:wrap">{pag}</div>"""
+
+
+@app.get("/audit", response_class=HTMLResponse)
+async def audit_page(request: Request):
+    return templates.TemplateResponse(request, "audit.html", {
+        "servers": YAML_CFG.servers,
+    })
 
 
 @app.get("/bots/{name}/unit/{service_name:path}", response_class=HTMLResponse)

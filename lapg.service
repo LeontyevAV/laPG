@@ -1,0 +1,15 @@
+[Unit]
+Description=laPG — PostgreSQL Management Web UI
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sasha/work/laPG
+ExecStart=/home/sasha/work/laPG/venv/bin/python run.py
+Restart=always
+RestartSec=5
+Environment=LAPG_PORT=8081
+Environment=PATH=/home/sasha/work/laPG/venv/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

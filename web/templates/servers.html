@@ -11,6 +11,7 @@
     <div class="server-actions">
       <button class="btn btn-sm" hx-get="/servers/{{ s.name }}/sqlite" hx-target="#sqlite-{{ s.name }}">.db</button>
       <a href="/servers/{{ s.name }}/users" class="btn btn-sm">Пользователи</a>
+      <a href="/servers/{{ s.name }}/aliases" class="btn btn-sm">alias</a>
     </div>
     <div id="sqlite-{{ s.name }}" class="server-sqlite"></div>
   </div>

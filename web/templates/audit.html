@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Аудит операций</h1>
+
+<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:end">
+  <div>
+    <label class="card-label" for="audit-action">Действие</label>
+    <select id="audit-action" class="select" onchange="loadAuditLogs()">
+      <option value="">Все</option>
+      <option value="backup">Бэкап</option>
+      <option value="backup-all">Бэкап всех</option>
+      <option value="service:restart">Рестарт</option>
+      <option value="service:stop">Стоп</option>
+      <option value="service:enable-start">Запуск</option>
+      <option value="service:daemon-reload">Daemon-reload</option>
+      <option value="update-from-server">Обновление из сервера</option>
+      <option value="deploy">Деплой</option>
+    </select>
+  </div>
+  <div>
+    <label class="card-label" for="audit-server">Сервер</label>
+    <select id="audit-server" class="select" onchange="loadAuditLogs()">
+      <option value="">Все</option>
+      {% for s in servers %}
+      <option value="{{ s.name }}">{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button class="btn btn-primary" onclick="loadAuditLogs()">Обновить</button>
+</div>
+
+<div id="audit-table"></div>
+
+<script>
+var auditPage = 1;
+
+function loadAuditLogs() {
+  var action = document.getElementById('audit-action').value;
+  var server = document.getElementById('audit-server').value;
+  var params = '?page=' + auditPage;
+  if (action) params += '&action=' + encodeURIComponent(action);
+  if (server) params += '&server=' + encodeURIComponent(server);
+  var container = document.getElementById('audit-table');
+  container.innerHTML = '<div class="muted">Загрузка...</div>';
+  fetch('/api/audit-log' + params)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      container.innerHTML = html;
+    })
+    .catch(function() {
+      container.innerHTML = '<div class="toast toast-fail">Ошибка загрузки</div>';
+    });
+}
+
+function loadAuditPage(p) {
+  auditPage = p;
+  loadAuditLogs();
+}
+
+loadAuditLogs();
+</script>
+{% endblock %}

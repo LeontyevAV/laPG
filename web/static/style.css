@@ -85,6 +85,8 @@ td.dbl-edit.editing select:focus-visible {
 .form-actions { display: flex; gap: .5rem; margin-top: .5rem; }
 
 .muted { color: var(--muted); font-size: .875rem; }
+
+.select { padding: .4rem .6rem; border: 1px solid var(--border); border-radius: var(--radius); font-size: .875rem; background: var(--surface); color: var(--text); }
 pre { font-size: .85rem; }
 
 .ep-found { margin-top: .25rem; padding: .25rem 0; display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
@@ -107,6 +109,13 @@ pre { font-size: .85rem; }
 .term-copy { background: none; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; font-size: .8rem; padding: .1rem .3rem; line-height: 1; color: #6b7280; display: inline-flex; align-items: center; }
 .term-copy:hover { background: #d1d5db; color: #111827; }
 .terminal-body { background: #1e1e2e; color: #cdd6f4; padding: .75rem 1rem; font-size: .82rem; white-space: pre-wrap; margin: 0; overflow-x: auto; min-height: 3rem; }
+.term-scroll { height: calc(100vh - 280px); min-height: 200px; overflow-y: auto; }
+.msel { position: relative; display: inline-block; }
+.msel-pop { display: none; position: absolute; top: 100%; left: 0; margin-top: .25rem; min-width: 140px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: .35rem; z-index: 50; box-shadow: 0 4px 14px rgba(0,0,0,.18); }
+.msel.open .msel-pop { display: block; }
+.msel-pop label { display: flex; align-items: center; gap: .4rem; padding: .3rem .5rem; font-size: .78rem; cursor: pointer; color: var(--muted); border-radius: 4px; white-space: nowrap; }
+.msel-pop label:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); }
+.msel-pop input { accent-color: var(--accent); }
 .terminal-status { padding: .4rem .75rem; font-size: .82rem; font-weight: 600; display: flex; align-items: center; gap: .5rem; }
 .terminal-status-run { background: #fef3c7; color: #92400e; }
 .terminal-status-ok { background: #dcfce7; color: #166534; }
@@ -210,3 +219,20 @@ td .copy-tbl-name { margin-right: .3rem; }
 .modal-close { position: absolute; top: .5rem; right: 1rem; font-size: 1.5rem; cursor: pointer; color: #888; }
 .modal-close:hover { color: #333; }
 .modal-pre { background: #1e1e1e; color: #d4d4d4; padding: .75rem; border-radius: var(--radius); font-size: .8rem; line-height: 1.5; overflow-x: auto; white-space: pre; max-height: 60vh; overflow-y: auto; user-select: text; }
+
+.src-layout { display: flex; gap: 1.5rem; align-items: flex-start; }
+.src-list { flex: 0 0 330px; min-width: 0; padding: 1rem 1.25rem; }
+.src-list h3 { margin: 0 0 .5rem; }
+.src-list .select { width: 100%; margin-bottom: .75rem; }
+.src-group-title { font-size: .72rem; text-transform: uppercase; color: var(--muted); font-weight: 600; margin: .9rem 0 .35rem; }
+.src-item {
+  display: flex; align-items: center; gap: .45rem; padding: .35rem .5rem; border-radius: 6px;
+  font-size: .85rem; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-item:hover { background: var(--highlight); }
+.src-item.active { background: var(--primary); color: #fff; }
+.src-item .src-tag { font-size: .68rem; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 .25rem; flex-shrink: 0; }
+.src-item.active .src-tag { color: #dfe7ff; border-color: rgba(255,255,255,.4); }
+.src-group { max-height: 300px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.src-view { flex: 1; min-width: 0; }
+.src-controls { display: flex; gap: .75rem; flex-wrap: wrap; align-items: end; margin-bottom: .75rem; }

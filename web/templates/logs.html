@@ -1,0 +1,401 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Логи</h1>
+
+<div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
+  <button class="btn btn-primary" id="tab-lapg" onclick="showTab('lapg')">laPG</button>
+  <button class="btn" id="tab-journal" onclick="showTab('journal')">Сервисы (SSH)</button>
+  <button class="btn" id="tab-cron" onclick="showTab('cron')">Cron-бэкапы</button>
+  <button class="btn" id="tab-selfupdate" onclick="showTab('selfupdate')">Self-update</button>
+  <a class="btn" href="/audit">Аудит →</a>
+</div>
+
+<!-- ============ laPG (локальный journal) ============ -->
+<div id="tab-lapg-panel">
+<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:end">
+  <div>
+    <label class="card-label" for="lapg-lines">Строк</label>
+    <input id="lapg-lines" type="number" class="select" value="200" min="1" max="1000" style="width:80px">
+  </div>
+  <div class="msel" id="lapg-msel">
+    <button type="button" class="btn" id="lapg-msel-btn" onclick="toggleMsel('lapg-msel')">Уровень</button>
+    <div class="msel-pop" id="lapg-level-chips" onchange="updateMselLabel('lapg-msel','lapg-msel-btn')">
+      <label><input type="checkbox" class="lvl-box" data-level="emerg"><span>emerg</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="alert"><span>alert</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="crit"><span>crit</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="err"><span>err</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="warning"><span>warning</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="notice"><span>notice</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="info"><span>info</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="debug"><span>debug</span></label>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="fetchLapgLog()">Показать</button>
+  <button class="btn" id="btn-lapg-live" onclick="toggleLapgLive()" style="border:1px solid #ef4444;color:#ef4444">Live</button>
+</div>
+
+<div class="terminal-box">
+  <div class="terminal-header">journalctl --user -u lapg<span id="lapg-status" class="muted" style="font-size:.75rem"></span></div>
+  <div id="lapg-terminal">
+    <pre class="terminal-body term-scroll">Нажмите "Показать" или "Live"</pre>
+  </div>
+</div>
+
+<div style="display:flex;gap:.5rem;margin-top:.75rem">
+  <button class="btn btn-sm" onclick="copyLogs('#lapg-terminal')">Копировать</button>
+  <button class="btn btn-sm" onclick="fetchLapgLog()">Обновить</button>
+  <button class="btn btn-sm" onclick="scrollEl('#lapg-terminal', true)">Вниз</button>
+  <button class="btn btn-sm" onclick="scrollEl('#lapg-terminal', false)">Вверх</button>
+</div>
+</div>
+
+<!-- ============ Сервисы (remote journalctl) ============ -->
+<div id="tab-journal-panel" style="display:none">
+<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:end">
+  <div>
+    <label class="card-label" for="log-server">Сервер</label>
+    <select id="log-server" class="select" onchange="onLogServerChange()">
+      <option value="">Выберите сервер</option>
+      {% for s in servers %}
+      <option value="{{ s.name }}">{{ s.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="card-label" for="log-service">Сервис</label>
+    <select id="log-service" class="select" disabled>
+      <option value="">Сначала выберите сервер</option>
+    </select>
+  </div>
+  <div>
+    <label class="card-label" for="log-lines">Строк</label>
+    <input id="log-lines" type="number" class="select" value="200" min="1" max="1000" style="width:80px">
+  </div>
+  <div>
+    <label class="card-label" for="log-since">С времени</label>
+    <input id="log-since" type="datetime-local" class="select" style="width:200px">
+  </div>
+  <div class="msel" id="log-msel">
+    <button type="button" class="btn" id="log-msel-btn" onclick="toggleMsel('log-msel')">Уровень</button>
+    <div class="msel-pop" id="log-level-chips" onchange="updateMselLabel('log-msel','log-msel-btn')">
+      <label><input type="checkbox" class="lvl-box" data-level="emerg"><span>emerg</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="alert"><span>alert</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="crit"><span>crit</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="err"><span>err</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="warning"><span>warning</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="notice"><span>notice</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="info"><span>info</span></label>
+      <label><input type="checkbox" class="lvl-box" data-level="debug"><span>debug</span></label>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="fetchLogs()">Показать</button>
+  <button class="btn" id="btn-live" onclick="toggleLive()" style="border:1px solid #ef4444;color:#ef4444">Live</button>
+  <div style="display:flex;align-items:center;gap:.4rem">
+    <input type="checkbox" id="log-autoreload" onchange="toggleAutoReload()">
+    <label for="log-autoreload" class="card-label" style="margin:0;cursor:pointer">Авто</label>
+  </div>
+</div>
+
+<div class="terminal-box">
+  <div class="terminal-header">journalctl<span id="log-status" class="muted" style="font-size:.75rem"></span></div>
+  <div id="log-terminal">
+    <pre class="terminal-body term-scroll">Выберите сервер и сервис для просмотра логов</pre>
+  </div>
+</div>
+
+<div style="display:flex;gap:.5rem;margin-top:.75rem">
+  <button class="btn btn-sm" onclick="copyLogs('#log-terminal')">Копировать</button>
+  <button class="btn btn-sm" onclick="fetchLogs()">Обновить</button>
+  <button class="btn btn-sm" onclick="scrollEl('#log-terminal', true)">Вниз</button>
+  <button class="btn btn-sm" onclick="scrollEl('#log-terminal', false)">Вверх</button>
+</div>
+</div>
+
+<!-- ============ Cron-бэкапы ============ -->
+<div id="tab-cron-panel" style="display:none">
+<div style="display:flex;gap:.75rem;margin-bottom:1rem;align-items:end">
+  <div>
+    <label class="card-label" for="cron-lines">Строк</label>
+    <input id="cron-lines" type="number" class="select" value="200" min="1" max="2000" style="width:80px">
+  </div>
+  <button class="btn btn-primary" onclick="fetchCronLog()">Показать</button>
+</div>
+
+<div class="terminal-box">
+  <div class="terminal-header">cron.log<span id="cron-status" class="muted" style="font-size:.75rem"></span></div>
+  <div id="cron-terminal">
+    <pre class="terminal-body term-scroll">Нажмите "Показать" для загрузки лога</pre>
+  </div>
+</div>
+
+<div style="display:flex;gap:.5rem;margin-top:.75rem">
+  <button class="btn btn-sm" onclick="copyLogs('#cron-terminal')">Копировать</button>
+  <button class="btn btn-sm" onclick="fetchCronLog()">Обновить</button>
+</div>
+</div>
+
+<!-- ============ Self-update ============ -->
+<div id="tab-selfupdate-panel" style="display:none">
+<div style="display:flex;gap:.75rem;margin-bottom:1rem;align-items:end">
+  <button class="btn btn-primary" onclick="fetchSelfUpdateLog()">Показать</button>
+  <span class="muted">Лог последнего обновления (tmp/self-update.log)</span>
+</div>
+
+<div class="terminal-box">
+  <div class="terminal-header">self-update.log<span id="selfupdate-status" class="muted" style="font-size:.75rem"></span></div>
+  <div id="selfupdate-terminal">
+    <pre class="terminal-body term-scroll">Нажмите "Показать" для загрузки лога</pre>
+  </div>
+</div>
+
+<div style="display:flex;gap:.5rem;margin-top:.75rem">
+  <button class="btn btn-sm" onclick="copyLogs('#selfupdate-terminal')">Копировать</button>
+  <button class="btn btn-sm" onclick="fetchSelfUpdateLog()">Обновить</button>
+</div>
+</div>
+
+<script>
+var autoReloadTimer = null;
+var liveSource = null;
+var lapgLiveSource = null;
+
+function getLevels(containerId) {
+  var boxes = document.querySelectorAll('#' + containerId + ' input.lvl-box:checked');
+  return Array.prototype.map.call(boxes, function(b) { return b.dataset.level; }).join(',');
+}
+
+function toggleMsel(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+
+function updateMselLabel(mselId, btnId) {
+  var names = [];
+  document.querySelectorAll('#' + mselId + ' input.lvl-box:checked')
+    .forEach(function(b) { names.push(b.dataset.level); });
+  var btn = document.getElementById(btnId);
+  if (!names.length) btn.textContent = 'Уровень';
+  else if (names.length <= 2) btn.textContent = 'Уровень: ' + names.join(', ');
+  else btn.textContent = 'Уровень: ' + names[0] + ', ... (+' + (names.length - 1) + ')';
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.msel')) {
+    document.querySelectorAll('.msel.open').forEach(function(m) { m.classList.remove('open'); });
+  }
+});
+
+function showTab(tab) {
+  var tabs = ['lapg', 'journal', 'cron', 'selfupdate'];
+  tabs.forEach(function(t) {
+    document.getElementById('tab-' + t + '-panel').style.display = t === tab ? '' : 'none';
+    document.getElementById('tab-' + t).className = t === tab ? 'btn btn-primary' : 'btn';
+  });
+}
+
+function fetchLapgLog() {
+  var lines = document.getElementById('lapg-lines').value;
+  var level = getLevels('lapg-level-chips');
+  var status = document.getElementById('lapg-status');
+  status.textContent = 'Загрузка...';
+  var container = document.getElementById('lapg-terminal');
+  var params = 'lines=' + encodeURIComponent(lines);
+  if (level) params += '&level=' + encodeURIComponent(level);
+  fetch('/api/journal/local?' + params)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      container.innerHTML = html;
+      status.textContent = ' — ' + new Date().toLocaleTimeString('ru');
+      scrollEl('#lapg-terminal', true);
+    })
+    .catch(function() { status.textContent = 'Ошибка загрузки'; });
+}
+
+function toggleLapgLive() {
+  if (lapgLiveSource) {
+    lapgLiveSource.close();
+    lapgLiveSource = null;
+    document.getElementById('btn-lapg-live').textContent = 'Live';
+    document.getElementById('btn-lapg-live').style.background = '';
+    document.getElementById('btn-lapg-live').style.color = '#ef4444';
+    document.getElementById('lapg-status').textContent = '';
+    return;
+  }
+  var container = document.getElementById('lapg-terminal');
+  container.innerHTML = '<pre class="terminal-body term-scroll"></pre>';
+  var body = container.querySelector('.terminal-body');
+  document.getElementById('btn-lapg-live').textContent = '■ Stop';
+  document.getElementById('btn-lapg-live').style.background = '#ef4444';
+  document.getElementById('btn-lapg-live').style.color = '#fff';
+  document.getElementById('lapg-status').textContent = 'Live: подключение...';
+  var params = 'level=' + encodeURIComponent(getLevels('lapg-level-chips'));
+  lapgLiveSource = new EventSource('/api/journal/local/stream?' + params);
+  lapgLiveSource.onmessage = function(e) {
+    if (body.textContent) body.textContent += '\n';
+    body.textContent += e.data;
+    body.scrollTop = body.scrollHeight;
+    document.getElementById('lapg-status').textContent = 'Live — ' + new Date().toLocaleTimeString('ru');
+  };
+  lapgLiveSource.onerror = function() {
+    lapgLiveSource.close();
+    lapgLiveSource = null;
+    document.getElementById('btn-lapg-live').textContent = 'Live';
+    document.getElementById('btn-lapg-live').style.background = '';
+    document.getElementById('btn-lapg-live').style.color = '#ef4444';
+    document.getElementById('lapg-status').textContent = 'Live: соединение потеряно';
+  };
+}
+
+function onLogServerChange() {
+  var server = document.getElementById('log-server').value;
+  var sel = document.getElementById('log-service');
+  if (!server) {
+    sel.innerHTML = '<option value="">Сначала выберите сервер</option>';
+    sel.disabled = true;
+    return;
+  }
+  sel.innerHTML = '<option value="">Загрузка...</option>';
+  sel.disabled = true;
+  fetch('/api/log-services/' + server)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(function(services) {
+      if (!Array.isArray(services)) throw new Error('Не JSON-массив');
+      var opts = '<option value="">-- все --</option>';
+      services.forEach(function(s) {
+        opts += '<option value="' + s + '">' + s + '</option>';
+      });
+      sel.innerHTML = opts;
+      sel.disabled = false;
+    })
+    .catch(function(err) {
+      sel.innerHTML = '<option value="">Ошибка: ' + (err && err.message ? err.message : 'загрузки') + '</option>';
+    });
+}
+
+function fetchLogs() {
+  var server = document.getElementById('log-server').value;
+  if (!server) return;
+  var service = document.getElementById('log-service').value;
+  var lines = document.getElementById('log-lines').value;
+  var level = getLevels('log-level-chips');
+  var since = document.getElementById('log-since').value;
+  var status = document.getElementById('log-status');
+  status.textContent = 'Загрузка...';
+  var container = document.getElementById('log-terminal');
+  var params = 'server_name=' + encodeURIComponent(server);
+  if (service) params += '&service=' + encodeURIComponent(service);
+  params += '&lines=' + encodeURIComponent(lines);
+  if (level) params += '&level=' + encodeURIComponent(level);
+  if (since) params += '&since=' + encodeURIComponent(since);
+  fetch('/api/journal?' + params)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      container.innerHTML = html;
+      var t = new Date().toLocaleTimeString('ru');
+      var svc = service || 'все';
+      status.textContent = server + ' / ' + svc + ' — ' + t;
+      scrollEl('#log-terminal', true);
+    })
+    .catch(function() {
+      status.textContent = 'Ошибка загрузки';
+    });
+}
+
+function toggleLive() {
+  if (liveSource) {
+    liveSource.close();
+    liveSource = null;
+    document.getElementById('btn-live').textContent = 'Live';
+    document.getElementById('btn-live').style.background = '';
+    document.getElementById('btn-live').style.color = '#ef4444';
+    document.getElementById('log-status').textContent = '';
+    return;
+  }
+  var server = document.getElementById('log-server').value;
+  if (!server) { alert('Выберите сервер'); return; }
+  var service = document.getElementById('log-service').value;
+  var level = getLevels('log-level-chips');
+  var body = document.querySelector('#log-terminal .terminal-body');
+  body.textContent = '';
+  document.getElementById('btn-live').textContent = '■ Stop';
+  document.getElementById('btn-live').style.background = '#ef4444';
+  document.getElementById('btn-live').style.color = '#fff';
+  document.getElementById('log-status').textContent = 'Live: подключение...';
+  var params = 'server_name=' + encodeURIComponent(server);
+  if (service) params += '&service=' + encodeURIComponent(service);
+  if (level) params += '&level=' + encodeURIComponent(level);
+  liveSource = new EventSource('/api/journal/stream?' + params);
+  liveSource.onmessage = function(e) {
+    if (body.textContent) body.textContent += '\n';
+    body.textContent += e.data;
+    body.scrollTop = body.scrollHeight;
+    var t = new Date().toLocaleTimeString('ru');
+    var svc = service || 'все';
+    document.getElementById('log-status').textContent = 'Live: ' + server + ' / ' + svc + ' — ' + t;
+  };
+  liveSource.onerror = function() {
+    liveSource.close();
+    liveSource = null;
+    document.getElementById('btn-live').textContent = 'Live';
+    document.getElementById('btn-live').style.background = '';
+    document.getElementById('btn-live').style.color = '#ef4444';
+    document.getElementById('log-status').textContent = 'Live: соединение потеряно';
+  };
+}
+
+function toggleAutoReload() {
+  if (document.getElementById('log-autoreload').checked) {
+    fetchLogs();
+    autoReloadTimer = setInterval(fetchLogs, 5000);
+  } else {
+    clearInterval(autoReloadTimer);
+    autoReloadTimer = null;
+  }
+}
+
+function fetchCronLog() {
+  var lines = document.getElementById('cron-lines').value;
+  var status = document.getElementById('cron-status');
+  status.textContent = 'Загрузка...';
+  var container = document.getElementById('cron-terminal');
+  fetch('/api/cron-log?lines=' + encodeURIComponent(lines))
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      container.innerHTML = html;
+      status.textContent = ' — ' + new Date().toLocaleTimeString('ru');
+    })
+    .catch(function() { status.textContent = 'Ошибка загрузки'; });
+}
+
+function fetchSelfUpdateLog() {
+  var status = document.getElementById('selfupdate-status');
+  status.textContent = 'Загрузка...';
+  var container = document.getElementById('selfupdate-terminal');
+  fetch('/api/self-update-log')
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      container.innerHTML = html;
+      status.textContent = ' — ' + new Date().toLocaleTimeString('ru');
+    })
+    .catch(function() { status.textContent = 'Ошибка загрузки'; });
+}
+
+function copyLogs(sel) {
+  var el = document.querySelector(sel + ' .terminal-body');
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(function() {
+    var hdr = document.querySelector(sel + ' .terminal-header');
+    var orig = hdr.textContent;
+    hdr.textContent = 'Скопировано!';
+    setTimeout(function() { hdr.textContent = orig; }, 1500);
+  });
+}
+
+function scrollEl(sel, bottom) {
+  var el = document.querySelector(sel + ' .terminal-body');
+  if (el) el.scrollTop = bottom ? el.scrollHeight : 0;
+}
+</script>
+{% endblock %}

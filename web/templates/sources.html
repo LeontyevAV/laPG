@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Журналы и лог-файлы</h1>
+
+<div class="src-layout">
+  <div class="src-list card">
+    <h3>Источники</h3>
+    <select id="src-server" class="select" onchange="loadSources()">
+      <option value="">Сервер не выбран</option>
+      {% for s in servers %}
+      <option value="{{ s.name }}">{{ s.name }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="src-group-title">Локально (этот ПК)</div>
+    <div class="src-group" id="src-local">
+      <div class="src-item" data-name="lapg" data-type="local" onclick="openSource('local','lapg','laPG (systemd)')">🖥 laPG (systemd)
+        <span class="src-tag">journal</span></div>
+    </div>
+
+    <div class="src-group-title" id="src-services-title" style="display:none">Сервисы (SSH journal)</div>
+    <div class="src-group" id="src-services"><div class="muted" id="src-services-hint">Выберите сервер</div></div>
+
+    <div class="src-group-title" id="src-files-title" style="display:none">Лог-файлы на сервере</div>
+    <div class="src-group" id="src-files"><div class="muted" id="src-files-hint">Выберите сервер</div></div>
+  </div>
+
+  <div class="src-view">
+    <div class="src-controls">
+      <div>
+        <label class="card-label" for="src-lines">Строк</label>
+        <input id="src-lines" type="number" class="select" value="200" min="10" max="2000" style="width:80px">
+      </div>
+      <div>
+        <label class="card-label">Уровень</label>
+        <div class="msel" id="src-msel">
+          <button class="btn" onclick="toggleMsel()">Уровень <span id="src-msel-label">все</span></button>
+          <div class="msel-pop" id="src-level-chips" style="min-width:150px">
+            <label><input type="checkbox" class="lvl-box" data-level="crit"><span>crit</span></label>
+            <label><input type="checkbox" class="lvl-box" data-level="alert"><span>alert</span></label>
+            <label><input type="checkbox" class="lvl-box" data-level="err"><span>err</span></label>
+            <label><input type="checkbox" class="lvl-box" data-level="warning"><span>warning</span></label>
+            <label><input type="checkbox" class="lvl-box" data-level="notice"><span>notice</span></label>
+            <label><input type="checkbox" class="lvl-box" data-level="info"><span>info</span></label>
+            <label><input type="checkbox" class="lvl-box" data-level="debug"><span>debug</span></label>
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="fetchContent()">Показать</button>
+      <button class="btn" id="src-btn-live" onclick="toggleLive()" style="border:1px solid #ef4444;color:#ef4444">Live</button>
+      <div style="display:flex;align-items:center;gap:.4rem">
+        <input type="checkbox" id="src-autoreload" onchange="toggleAutoReload()">
+        <label for="src-autoreload" class="card-label" style="margin:0;cursor:pointer">Авто</label>
+      </div>
+      <div style="flex:1"></div>
+      <button class="btn btn-sm" onclick="copyLogText()">Копировать</button>
+      <button class="btn btn-sm" onclick="scrollEnd(true)">Вниз</button>
+      <button class="btn btn-sm" onclick="scrollEnd(false)">Вверх</button>
+    </div>
+
+    <div id="src-status" class="muted" style="margin-bottom:.5rem"></div>
+    <div class="terminal-box">
+      <div class="terminal-header" id="src-src-name">не выбран<span class="muted" id="src-live-badge"></span></div>
+      <div id="src-body">
+        <pre class="terminal-body term-scroll">Выберите источник слева</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var srcServer = '';
+var curType = '';
+var curName = '';
+var liveSource = null;
+var liveTimer = null;
+var autoReload = false;
+var autoTimer = null;
+
+function getSrcLines() {
+  return parseInt(document.getElementById('src-lines').value, 10) || 200;
+}
+
+function getLevels() {
+  var boxes = document.querySelectorAll('#src-level-chips .lvl-box');
+  var levels = [];
+  for (var i = 0; i < boxes.length; i++) {
+    if (boxes[i].checked) levels.push(boxes[i].dataset.level);
+  }
+  return levels;
+}
+
+function updateMselLabel() {
+  var l = getLevels();
+  var label = document.getElementById('src-msel-label');
+  label.textContent = l.length ? l.join(',') : 'все';
+}
+
+function toggleMsel() {
+  document.getElementById('src-msel').classList.toggle('open');
+}
+
+document.getElementById('src-level-chips').addEventListener('change', updateMselLabel);
+
+document.addEventListener('click', function(e) {
+  var sel = document.getElementById('src-msel');
+  if (sel && !e.target.closest('#src-msel')) {
+    sel.classList.remove('open');
+  }
+});
+
+function loadSources() {
+  srcServer = document.getElementById('src-server').value;
+  document.getElementById('src-services').innerHTML = '<div class="muted">Загрузка...</div>';
+  document.getElementById('src-files').innerHTML = '<div class="muted">Загрузка...</div>';
+  document.getElementById('src-services-title').style.display = srcServer ? '' : 'none';
+  document.getElementById('src-files-title').style.display = srcServer ? '' : 'none';
+  if (!srcServer) {
+    document.getElementById('src-services').innerHTML = '<div class="muted">Выберите сервер</div>';
+    document.getElementById('src-files').innerHTML = '<div class="muted">Выберите сервер</div>';
+    return;
+  }
+  Promise.all([
+    fetch('/api/log-services/' + encodeURIComponent(srcServer)).then(function(r) { return r.json(); }).catch(function() { return []; }),
+    fetch('/api/log-files/' + encodeURIComponent(srcServer)).then(function(r) { return r.json(); }).catch(function() { return []; })
+  ]).then(function(res) {
+    var services = res[0] || [];
+    var files = res[1] || [];
+    var sbox = document.getElementById('src-services');
+    sbox.innerHTML = '';
+    if (!services.length) {
+      sbox.innerHTML = '<div class="muted">Сервисы не найдены</div>';
+    } else {
+      for (var i = 0; i < services.length; i++) {
+        var it = document.createElement('div');
+        it.className = 'src-item';
+        it.dataset.type = 'service';
+        it.dataset.name = services[i];
+        it.onclick = function() { openSource('service', this.dataset.name, this.dataset.name); };
+        it.textContent = services[i];
+        var tag = document.createElement('span');
+        tag.className = 'src-tag';
+        tag.textContent = 'journal';
+        it.appendChild(tag);
+        sbox.appendChild(it);
+      }
+    }
+    var fbox = document.getElementById('src-files');
+    fbox.innerHTML = '';
+    if (!files.length) {
+      fbox.innerHTML = '<div class="muted">Файлы не найдены</div>';
+    } else {
+      for (var j = 0; j < files.length; j++) {
+        var it2 = document.createElement('div');
+        it2.className = 'src-item';
+        it2.dataset.type = 'file';
+        it2.dataset.name = files[j];
+        it2.title = files[j];
+        it2.onclick = function() { openSource('file', this.dataset.name, this.dataset.name); };
+        var tag2 = document.createElement('span');
+        tag2.className = 'src-tag';
+        tag2.textContent = 'file';
+        var span = document.createElement('span');
+        span.style.cssText = 'overflow:hidden;text-overflow:ellipsis';
+        span.textContent = files[j];
+        it2.appendChild(span);
+        it2.appendChild(tag2);
+        fbox.appendChild(it2);
+      }
+    }
+  });
+}
+
+function openSource(type, name, label) {
+  stopLive();
+  curType = type;
+  curName = name;
+  document.getElementById('src-src-name').innerHTML = '<span class="src-src-label">' + label + '</span> <span class="muted" id="src-live-badge"></span>';
+  // active highlight
+  var items = document.querySelectorAll('.src-item');
+  for (var i = 0; i < items.length; i++) {
+    items[i].classList.toggle('active', items[i].dataset.type === type && items[i].dataset.name === name);
+  }
+  fetchContent();
+}
+
+function fetchContent() {
+  if (!curType || !curName) return;
+  stopLive();
+  setStatus('Загрузка...');
+  var lines = getSrcLines();
+  var levels = getLevels();
+  var url = '';
+  if (curType === 'local') {
+    url = '/api/journal/local?lines=' + lines;
+    if (levels.length) url += '&level=' + encodeURIComponent(levels.join(','));
+  } else if (curType === 'service') {
+    url = '/api/journal?server_name=' + encodeURIComponent(srcServer) + '&service=' + encodeURIComponent(curName) + '&lines=' + lines;
+    if (levels.length) url += '&level=' + encodeURIComponent(levels.join(','));
+  } else if (curType === 'file') {
+    url = '/api/ssh-file?server_name=' + encodeURIComponent(srcServer) + '&path=' + encodeURIComponent(curName) + '&lines=' + lines;
+  }
+  fetch(url)
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      document.getElementById('src-body').innerHTML = html;
+      setStatus('');
+    })
+    .catch(function() { setStatus('Ошибка загрузки'); });
+}
+
+function setStatus(t) {
+  document.getElementById('src-status').textContent = t;
+}
+
+function toggleLive() {
+  if (!curType || !curName) return;
+  if (liveSource || liveTimer) { stopLive(); return; }
+  setStatus('Live...');
+  if (curType === 'file') {
+    liveTimer = setInterval(function() {
+      var lines = getSrcLines();
+      fetch('/api/ssh-file?server_name=' + encodeURIComponent(srcServer) + '&path=' + encodeURIComponent(curName) + '&lines=' + lines)
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          document.getElementById('src-body').innerHTML = html;
+          setStatus('Live (обновление каждые 2с)');
+        });
+    }, 2000);
+    setLiveBtn(true);
+    setStatus('Live (обновление каждые 2с)');
+    return;
+  }
+  var levels = getLevels();
+  var url;
+  if (curType === 'local') {
+    url = '/api/journal/local/stream?';
+  } else {
+    url = '/api/journal/stream?server_name=' + encodeURIComponent(srcServer) + '&service=' + encodeURIComponent(curName) + '&';
+  }
+  if (levels.length) url += 'level=' + encodeURIComponent(levels.join(','));
+  liveSource = new EventSource(url);
+  liveSource.onmessage = function(ev) {
+    var pre = document.querySelector('#src-body pre');
+    if (!pre) {
+      document.getElementById('src-body').innerHTML = '<pre class="terminal-body term-scroll"></pre>';
+      pre = document.querySelector('#src-body pre');
+    }
+    pre.textContent += ev.data + '\n';
+    setStatus('Live...');
+  };
+  liveSource.onerror = function() {
+    liveSource.close();
+    liveSource = null;
+    setLiveBtn(false);
+    setStatus('Live прерван');
+  };
+  setLiveBtn(true);
+}
+
+function stopLive() {
+  if (liveSource) { liveSource.close(); liveSource = null; }
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+  setLiveBtn(false);
+}
+
+function setLiveBtn(on) {
+  var b = document.getElementById('src-btn-live');
+  if (on) { b.style.borderColor = '#16a34a'; b.style.color = '#16a34a'; b.style.background = '#f0fdf4'; b.textContent = 'Live...'; }
+  else { b.style.borderColor = '#ef4444'; b.style.color = '#ef4444'; b.style.background = ''; b.textContent = 'Live'; }
+}
+
+function toggleAutoReload() {
+  autoReload = document.getElementById('src-autoreload').checked;
+  if (autoReload && !autoTimer) {
+    autoTimer = setInterval(function() {
+      if (curType && curName) fetchContent();
+    }, 5000);
+  } else if (!autoReload && autoTimer) {
+    clearInterval(autoTimer);
+    autoTimer = null;
+  }
+}
+
+function copyLogText() {
+  var pre = document.querySelector('#src-body pre');
+  if (pre) navigator.clipboard.writeText(pre.textContent);
+}
+
+function scrollEnd(toBottom) {
+  var box = document.querySelector('#src-body .terminal-body');
+  if (!box) return;
+  box.scrollTo(0, toBottom ? box.scrollHeight : 0);
+}
+
+document.getElementById('src-server').value = '';
+</script>
+{% endblock %}

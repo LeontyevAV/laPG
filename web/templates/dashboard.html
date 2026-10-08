@@ -45,6 +45,17 @@
 
 <div id="result"></div>
 
+<section style="margin-top:1.5rem">
+  <div class="section-header">
+    <h2>laPG — статус</h2>
+    <button class="btn btn-sm" onclick="loadLapgStatus()">Обновить</button>
+    <button class="btn btn-sm btn-primary" onclick="selfUpdate()">Обновить laPG</button>
+  </div>
+  <div id="lapg-status" class="card" style="font-size:.875rem">
+    <span class="muted">Загрузка...</span>
+  </div>
+</section>
+
 <div id="update-modal" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.5);align-items:center;justify-content:center" onclick="if(event.target===this)closeUpdateModal()">
   <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:1.5rem;min-width:400px;max-width:500px" onclick="event.stopPropagation()">
     <h3 style="margin-top:0">Обновить БД из сервера</h3>
@@ -82,6 +93,35 @@
 </div>
 
 <script>
+function loadLapgStatus() {
+  var container = document.getElementById('lapg-status');
+  fetch('/api/self-update/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var badge = data.active ? '<span class="badge badge-green">работает</span>' : '<span class="badge badge-red">не работает</span>';
+      container.innerHTML = 'Сервис lapg: ' + badge +
+        '<br>Запущен: ' + (data.started || '—') +
+        '<br>Версия: ' + (data.version || '—');
+    })
+    .catch(function() {
+      container.innerHTML = '<span class="muted">Статус недоступен</span>';
+    });
+}
+
+function selfUpdate() {
+  var container = document.getElementById('lapg-status');
+  container.innerHTML = '<span class="muted">Обновление... git pull + рестарт, может занять до 2 минут</span>';
+  fetch('/api/self-update', {method: 'POST'})
+    .then(function(r) { return r.text(); })
+    .then(function(html) {
+      container.innerHTML = html;
+      setTimeout(loadLapgStatus, 2000);
+    })
+    .catch(function(e) {
+      container.innerHTML = '<div class="toast toast-fail">Ошибка: ' + e.message + '</div>';
+    });
+}
+
 document.addEventListener('click', function(e) {
   var btn = e.target.closest('[data-action="open-update-modal"]');
   if (btn) {

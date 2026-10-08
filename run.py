@@ -14,6 +14,6 @@ except ImportError:
     sys.exit(1)
 
 host = cfg.web.host
-port = cfg.web.port
+port = int(os.environ.get("LAPG_PORT", cfg.web.port))
 print(f"laPG Web UI → http://{host}:{port}")
 uvicorn.run("web.app:app", host=host, port=port)
