@@ -14,7 +14,7 @@ scheduler:
   cron: 0 2 * * *
 web:
   enabled: false
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8080
 remote:
   host: 82.97.248.238
